@@ -1,0 +1,33 @@
+# Node.js依赖
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+package-lock.json
+
+# TypeScript编译输出
+out/
+dist/
+*.js
+*.js.map
+!webpack.config.js
+
+# VSCode和Cursor本地文件
+.vscode/
+.vscode-test/
+.cursor/
+*.vsix
+
+# Go项目相关
+/src/vendor/
+go.sum
+
+# 临时文件
+tmp/
+.tmp/
+temp/
+.temp/
+
+# 操作系统文件
+.DS_Store
+Thumbs.db 
