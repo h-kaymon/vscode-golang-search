@@ -1,8 +1,25 @@
 {
   "name": "golang-search",
-  "displayName": "Golang search",
-  "description": "search golang files and dependencies",
+  "displayName": "Golang Search",
+  "description": "Search Go files and dependencies, including workspace and module cache",
   "version": "0.0.1",
+  "publisher": "kaymon",
+  "author": {
+    "name": "kaymon"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/h-kaymon/vscode-golang-search/"
+  },
+  "icon": "images/icon.png",
+  "license": "MIT",
+  "keywords": [
+    "golang",
+    "go",
+    "search",
+    "dependencies",
+    "modules"
+  ],
   "engines": {
     "vscode": "^1.74.0"
   },

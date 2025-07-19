@@ -226,7 +226,7 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
     }
 }
 
-// 搜索结果树视图提供程序
+// provider for search results tree view
 class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<SearchResultItem | undefined | null | void> = new vscode.EventEmitter<SearchResultItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<SearchResultItem | undefined | null | void> = this._onDidChangeTreeData.event;
@@ -241,13 +241,13 @@ class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultIte
 
     getChildren(element?: SearchResultItem): Thenable<SearchResultItem[]> {
         if (element) {
-            // 如果有父元素，返回其子元素（目前没有层级结构，所以返回空数组）
+            // if has parent element, return its children (currently no hierarchy, so return empty array)
             return Promise.resolve([]);
         }
 
-        // 返回根级别的项目
+        // return root level items
         if (lastSearchResults.length === 0) {
-            // 如果没有搜索结果，显示一个提示信息
+            // if no search results, show a prompt message
             const noResultsItem = new SearchResultItem(
                 "click here to start search",
                 vscode.TreeItemCollapsibleState.None,
@@ -261,14 +261,14 @@ class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultIte
             return Promise.resolve([noResultsItem]);
         }
 
-        // 分离工作区和依赖库结果
+        // separate workspace and dependency results
         const workspaceResults = lastSearchResults.filter(r => r.source === ResultSource.Workspace);
         const dependencyResults = lastSearchResults.filter(r => r.source === ResultSource.Dependency);
         
-        // 创建标题项
+        // create title items
         const items: SearchResultItem[] = [];
         
-        // 添加搜索信息头
+        // add search info header
         const searchInfoItem = new SearchResultItem(
             `search: "${lastSearchText}" (${lastSearchResults.length} results)`,
             vscode.TreeItemCollapsibleState.Expanded,
@@ -281,7 +281,7 @@ class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultIte
         searchInfoItem.contextValue = 'searchInfo';
         items.push(searchInfoItem);
         
-        // 添加工作区结果
+        // add workspace results
         if (workspaceResults.length > 0) {
             const workspaceHeader = new SearchResultItem(
                 `workspace (${workspaceResults.length})`,
@@ -311,7 +311,7 @@ class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultIte
             });
         }
         
-        // 添加依赖库结果
+        // add dependency results
         if (dependencyResults.length > 0) {
             const depHeader = new SearchResultItem(
                 `dependencies (${dependencyResults.length})`,
@@ -346,7 +346,7 @@ class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultIte
     }
 }
 
-// 搜索结果树项目
+// search result tree item
 class SearchResultItem extends vscode.TreeItem {
     constructor(
         public readonly label: string,
@@ -360,7 +360,7 @@ class SearchResultItem extends vscode.TreeItem {
     }
 }
 
-// 搜索工作区项目中的内容
+// search workspace items
 async function searchInWorkspace(workspaceDir: string, searchText: string): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
     
@@ -613,7 +613,7 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
         
-        // 检查是否是Go项目（存在go.mod文件）
+        // check if it is a Go project (exists go.mod file)
         const workspaceDir = workspaceFolders[0].uri.fsPath;
         const goModPath = path.join(workspaceDir, 'go.mod');
         
@@ -622,7 +622,7 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
         
-        // 创建QuickPick用于实时搜索
+        // create QuickPick for real-time search
         const quickPick = vscode.window.createQuickPick();
         quickPick.placeholder = 'search in Go dependencies';
         quickPick.title = 'input keyword to search';
@@ -631,10 +631,10 @@ export function activate(context: vscode.ExtensionContext) {
         quickPick.matchOnDescription = true;
         quickPick.matchOnDetail = true;
         
-        // 添加防抖函数，避免频繁搜索
+        // add debounce function to avoid frequent search
         let debounceTimeout: NodeJS.Timeout | null = null;
         
-        // 监听输入变化
+        // listen for input changes
         quickPick.onDidChangeValue((value) => {
             console.log('input changed:', value);
             
@@ -644,24 +644,24 @@ export function activate(context: vscode.ExtensionContext) {
                 return; // at least 3 characters to start search
             }
             
-            // 设置忙碌状态
+            // set busy status
             quickPick.busy = true;
             
-            // 取消之前的延迟执行
+            // cancel previous delay execution
             if (debounceTimeout) {
                 clearTimeout(debounceTimeout);
             }
             
-            // 设置延迟执行的搜索（300ms防抖）
+            // set delay execution of search (300ms debounce)
             debounceTimeout = setTimeout(async () => {
                 try {            
-                    // 同时搜索工作区和依赖库
+                    // search workspace and dependencies
                     const [workspaceResults, dependencyResults] = await Promise.all([
                         searchInWorkspace(workspaceDir, value),
                         searchInDependencies(workspaceDir, value)
                     ]);
                     
-                    // 对每个结果集单独排序，非测试文件优先
+                    // sort each result set separately, non-test files first
                     const sortWorkspaceResults = (a: SearchResult, b: SearchResult) => {
                         const aIsTest = a.location.uri.fsPath.endsWith('_test.go');
                         const bIsTest = b.location.uri.fsPath.endsWith('_test.go');
@@ -670,59 +670,59 @@ export function activate(context: vscode.ExtensionContext) {
                         return 0;
                     };
                     
-                    // 确保结果集内部也是按照非测试文件优先排序
+                    // ensure result set is sorted by non-test files first
                     const sortedWorkspaceResults = [...workspaceResults].sort(sortWorkspaceResults);
                     const sortedDependencyResults = [...dependencyResults].sort(sortWorkspaceResults);
                     
-                    // 优先显示工作区结果，然后是依赖库结果，每个分组中非测试文件优先
+                    // prioritize workspace results, then dependency results, non-test files first in each group
                     const topResults = [...sortedWorkspaceResults, ...sortedDependencyResults];
                     
-                    // 保存搜索结果以供侧边栏显示
+                    // save search results for sidebar display
                     lastSearchResults = [...workspaceResults, ...dependencyResults];
                     lastSearchText = value;
                     
-                    // 更新侧边栏视图
+                    // update sidebar view
                     vscode.commands.executeCommand('setContext', 'golang-search.hasResults', true);
                     searchResultsProvider.refresh();
                     
-                    // 获取 Go 模块缓存路径用于简化文件路径
+                    // get Go module cache path for simplified file path
                     const goModCachePath = await getGoModCachePath();
                     const prefixToRemove = goModCachePath + '/';
                     
-                    // 转换为QuickPickItem格式
+                    // convert to QuickPickItem format
                     const items = topResults.map(result => {
                         const location = result.location;
                         const filePath = location.uri.fsPath;
                         const fileName = path.basename(filePath);
                         
-                        // 简化文件路径，去掉 Go 模块缓存路径前缀
+                        // simplify file path, remove Go module cache path prefix
                         let simplifiedPath = filePath;
                         if (result.source === ResultSource.Dependency && simplifiedPath.startsWith(prefixToRemove)) {
                             simplifiedPath = simplifiedPath.substring(prefixToRemove.length);
                         }
                         
-                        // 为依赖库搜索结果添加深黄色背景
+                        // add deep yellow background to dependency search results
                         const item: vscode.QuickPickItem = {
                             label: result.content,
                             description: `${fileName}:${location.range.start.line + 1}`,
                             detail: simplifiedPath,
                         };
                         
-                        // 添加自定义字段
+                        // add custom field
                         (item as any).location = location;
                         
-                        // 为依赖库结果设置样式
+                        // set style for dependency results
                         if (result.source === ResultSource.Dependency) {
-                            // 添加多个颜色指示符号到label前面
+                            // add multiple color indicators to label
                             item.label = `[library] $(symbol-color) $(debug-stackframe-dot) ${result.content}`;
                             
-                            // 添加明显的黄色标记
+                            // add obvious yellow mark
                             item.description = `$(symbol-color) ${item.description}`;
                             
-                            // 添加额外的颜色提示到detail前面
+                            // add additional color hint to detail
                             item.detail = `$(debug-breakpoint-function-unverified) ${item.detail}`;
                             
-                            // 设置图标按钮
+                            // set icon button
                             (item as any).buttons = [{ 
                                 iconPath: new vscode.ThemeIcon('library'),
                                 tooltip: 'library results'
@@ -732,15 +732,15 @@ export function activate(context: vscode.ExtensionContext) {
                         return item;
                     });
                     
-                    // 使用 alwaysShow 属性确保工作区结果始终在前面
+                    // use alwaysShow property to ensure workspace results are always in front
                     const workspaceItems = items.filter((item: any) => 
                         item.location && !(item.label.startsWith('[library]'))
                     ).map(item => {
-                        // 设置 alwaysShow = true 让工作区结果始终显示在前面
+                        // set alwaysShow = true to ensure workspace results are always in front
                         return {
                             ...item,
                             alwaysShow: true,
-                            // 添加特殊标记表明这是工作区结果
+                            // add special mark to indicate this is a workspace result
                             label: `${item.label}`
                         };
                     });
@@ -749,10 +749,10 @@ export function activate(context: vscode.ExtensionContext) {
                         item.location && item.label.startsWith('[library]')
                     );
                     
-                    // 重新组合结果
+                    // recombine results
                     const sortedItems = [...workspaceItems, ...dependencyItems];
                     
-                    // 更新搜索结果
+                    // update search results
                     quickPick.items = sortedItems;        
                     
                     if (sortedItems.length === 0) {
@@ -768,12 +768,12 @@ export function activate(context: vscode.ExtensionContext) {
             }, 300);
         });
         
-        // 监听选择变化（单击直接打开文件）
+        // listen for selection changes (single click to open file)
         quickPick.onDidChangeSelection(async (items) => {
             const selected = items[0] as any;
             if (selected && selected.location) {
                 try {
-                    // 检查文件是否存在和路径是否有效
+                    // check if file exists and path is valid
                     const filePath = selected.location.uri.fsPath;
                     if (!filePath || !fs.existsSync(filePath)) {
                         console.log('file not found or path is invalid:', filePath);
@@ -781,7 +781,7 @@ export function activate(context: vscode.ExtensionContext) {
                         return;
                     }
                     
-                    // 检查文件类型和打开文件
+                    // check file type and open file
                     const stats = fs.statSync(filePath);
                     if (!stats.isFile()) {
                         console.log('path is not a valid file:', filePath);
@@ -789,16 +789,16 @@ export function activate(context: vscode.ExtensionContext) {
                         return;
                     }
                     
-                    // 打开选中的文件
+                    // open selected file
                     const document = await vscode.workspace.openTextDocument(selected.location.uri);
                     const editor = await vscode.window.showTextDocument(document);
                     
-                    // 跳转到对应行
+                    // jump to corresponding line
                     const range = selected.location.range;
                     editor.selection = new vscode.Selection(range.start, range.start);
                     editor.revealRange(range);
                     
-                    // 关闭QuickPick
+                    // close QuickPick
                     quickPick.dispose();
                 } catch (error) {
                     console.error('open file failed:', error);
@@ -807,12 +807,12 @@ export function activate(context: vscode.ExtensionContext) {
             }
         });
         
-        // 处理双击（确认选择）
+        // handle double click (confirm selection)
         quickPick.onDidAccept(async () => {
             const selected = quickPick.selectedItems[0] as any;
             if (selected && selected.location) {
                 try {
-                    // 检查文件是否存在和路径是否有效
+                    // check if file exists and path is valid
                     const filePath = selected.location.uri.fsPath;
                     if (!filePath || !fs.existsSync(filePath)) {
                         console.log('file not found or path is invalid:', filePath);
@@ -820,7 +820,7 @@ export function activate(context: vscode.ExtensionContext) {
                         return;
                     }
                     
-                    // 检查文件类型和打开文件
+                    // check file type and open file
                     const stats = fs.statSync(filePath);
                     if (!stats.isFile()) {
                         console.log('path is not a valid file:', filePath);
@@ -828,16 +828,16 @@ export function activate(context: vscode.ExtensionContext) {
                         return;
                     }
                     
-                    // 打开选中的文件
+                    // open selected file
                     const document = await vscode.workspace.openTextDocument(selected.location.uri);
                     const editor = await vscode.window.showTextDocument(document);
                     
-                    // 跳转到对应行
+                    // jump to corresponding line
                     const range = selected.location.range;
                     editor.selection = new vscode.Selection(range.start, range.start);
                     editor.revealRange(range);
                     
-                    // 关闭QuickPick
+                    // close QuickPick
                     quickPick.dispose();
                 } catch (error) {
                     console.error('open file failed:', error); 
@@ -846,7 +846,7 @@ export function activate(context: vscode.ExtensionContext) {
             }
         });
         
-        // 设置初始 items
+        // set initial items
         quickPick.items = [
             {
                 label: 'input search keyword...',
@@ -859,10 +859,10 @@ export function activate(context: vscode.ExtensionContext) {
     
     context.subscriptions.push(searchCommand);
     
-    // 主动刷新一次树视图
+    // manually refresh once the tree view
     searchResultsProvider.refresh();
     
-    // 确保视图可见
+    // ensure view is visible
     vscode.commands.executeCommand('workbench.view.extension.golang-search');
 }
 
