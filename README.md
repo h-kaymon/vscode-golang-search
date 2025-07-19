@@ -1,46 +1,51 @@
-# Golang库搜索插件项目
+# Golang Library Search Extension
 
-这个项目是一个为Cursor编辑器开发的插件，目的是实现在Golang项目中通过全局搜索关键字，能够搜索到go mod tidy之后的库文件里面的内容，类似GoLand的功能。
+This Cursor extension helps you search globally across Golang projects, including searching within dependency library files after running go mod tidy.
 
-## 项目结构
+## Features
 
-- `extension/`: 包含Cursor插件源代码
-  - `src/`: 插件的TypeScript源代码
-  - `package.json`: 插件配置文件
-  - `tsconfig.json`: TypeScript配置
-  - `webpack.config.js`: 打包配置
-  - `README.md`: 插件说明
-  - `INSTALL.md`: 安装指南
-- `src/`: 示例Go项目，用于测试插件功能
+- Search for code content in Golang project dependencies
+- Support direct navigation to dependency library code locations
+- Compatible with standard Golang module projects
+- Display search results in sidebar with highlighted keywords
+- Prioritize non-test files in search results
 
-## 主要功能
+## Usage
 
-- 在Golang项目中全局搜索，包括依赖库内容
-- 支持搜索go mod管理的所有依赖库
-- 支持在搜索结果中直接跳转到依赖库文件
-- 与Cursor编辑器无缝集成
+1. Open a Golang project containing a `go.mod` file
+2. Run the "search golang files and dependencies" command via the command palette (Cmd+Shift+P)
+3. Enter the keywords to search for
+4. View search results, click on a result to jump to the corresponding library file location
 
-## 实现原理
+## Requirements
 
-该插件通过以下步骤实现全局搜索功能：
+- Go language environment installed
+- Project must be based on Go modules (containing a go.mod file)
+- Dependencies must have been downloaded with `go mod tidy` or `go mod download`
 
-1. 使用Go工具获取GOMODCACHE路径（依赖库的存储位置）
-2. 使用`go list -m all`命令获取当前项目的所有依赖模块
-3. 使用grep工具在这些依赖库中搜索关键字
-4. 将搜索结果以适当的格式呈现在Cursor编辑器中
-5. 支持用户直接点击搜索结果跳转到对应文件位置
+## How It Works
 
-## 安装和使用
+The extension implements global search through the following steps:
 
-详细的安装说明见 [extension/INSTALL.md](extension/INSTALL.md)。
-插件的具体使用方法见 [extension/README.md](extension/README.md)。
+1. Uses `go env GOMODCACHE` to get the location of the Go module cache
+2. Uses `go list -m all` to get all modules that the project depends on
+3. Searches for user-specified keywords in the module cache using grep
+4. Converts search results to location information that VSCode/Cursor can understand
+5. Displays matches in the search results panel with highlighted keywords
 
-## 开发环境要求
+## Features in Detail
 
-- Node.js 和 npm（用于插件开发）
-- Go语言环境（用于示例项目和依赖管理）
-- Cursor编辑器或VS Code
+- **Real-time Search**: Results update as you type (with debounce)
+- **Workspace + Dependencies**: Searches both workspace files and dependencies
+- **Result Prioritization**: Non-test files are prioritized over test files
+- **Visual Distinction**: Dependency results are marked with a gold border
+- **Keyword Highlighting**: Search terms are highlighted in the results
+- **Sidebar Integration**: Dedicated search view in the activity bar
+- **Statistics**: Shows counts of regular and test files in results
 
-## 参与贡献
+## Feedback
 
-欢迎提交问题报告或功能请求。如果您想贡献代码，请先开issue讨论您想要实现的功能。 
+If you have any issues or suggestions, please submit an issue. 
+
+---
+[Chinese Version](./extension/README_cn.md) 
