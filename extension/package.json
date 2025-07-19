@@ -10,16 +10,70 @@
     "Other"
   ],
   "activationEvents": [
-    "onLanguage:go"
+    "*"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "golang-search.searchInDeps",
-        "title": "在Golang依赖库中搜索"
+        "title": "在Golang依赖库中搜索",
+        "icon": "$(search)"
+      },
+      {
+        "command": "golang-search.refreshView",
+        "title": "刷新",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "golang-search.clearResults",
+        "title": "清除结果",
+        "icon": "$(clear-all)"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "golang-search",
+          "title": "Go代码搜索",
+          "icon": "$(search)"
+        }
+      ]
+    },
+    "views": {
+      "golang-search": [
+        {
+          "id": "golang-search-results",
+          "name": "Go代码搜索",
+          "type": "webview"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "golang-search-results",
+        "contents": "没有搜索结果。\n[开始搜索](command:golang-search.searchInDeps)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "golang-search.searchInDeps",
+          "when": "view == golang-search-results",
+          "group": "navigation"
+        },
+        {
+          "command": "golang-search.refreshView",
+          "when": "view == golang-search-results",
+          "group": "navigation"
+        },
+        {
+          "command": "golang-search.clearResults",
+          "when": "view == golang-search-results",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
