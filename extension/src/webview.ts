@@ -1,12 +1,12 @@
-// 生成webview的HTML内容
+// Generate webview HTML content
 export function getWebviewContent(searchText?: string) {
     return /*html*/`
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Go 代码搜索</title>
+    <title>Go Code Search</title>
     <style>
         body {
             font-family: var(--vscode-font-family);
@@ -70,7 +70,7 @@ export function getWebviewContent(searchText?: string) {
             border-left: 3px solid gold;
         }
         .test-file-item {
-            border-left: 3px solid #8ba0a8; /* 灰蓝色标识测试文件 */
+            border-left: 3px solid #8ba0a8; /* Grayish blue indicator for test files */
             opacity: 0.9;
         }
         .highlight {
@@ -105,11 +105,11 @@ export function getWebviewContent(searchText?: string) {
 </head>
 <body>
     <div class="search-container">
-        <input type="text" id="search-input" placeholder="搜索Go代码 (至少输入3个字符)" value="${searchText || ''}" />
+        <input type="text" id="search-input" placeholder="Search Go code (at least 3 characters)" value="${searchText || ''}" />
     </div>
     
     <div id="search-status" class="tips">
-        输入关键词开始搜索 Go 代码...
+        Enter keywords to search Go code...
     </div>
     
     <div id="results-container" class="results-container"></div>
@@ -120,11 +120,11 @@ export function getWebviewContent(searchText?: string) {
         const resultsContainer = document.getElementById('results-container');
         const searchStatus = document.getElementById('search-status');
         
-        // 高亮关键词函数
+        // Highlight keywords function
         function highlightText(text, keyword) {
             if (!keyword || keyword.length < 2) return text;
             
-            // 转义正则表达式特殊字符
+            // Escape regex special characters
             function escapeRegExp(string) {
                 return string.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
             }
@@ -137,7 +137,7 @@ export function getWebviewContent(searchText?: string) {
             });
         }
         
-        // 防抖函数
+        // Debounce function
         function debounce(func, wait) {
             let timeout;
             return function(...args) {
@@ -146,71 +146,71 @@ export function getWebviewContent(searchText?: string) {
             };
         }
         
-        // 处理搜索输入
+        // Handle search input
         const handleSearch = debounce((text) => {
             if (text.length >= 3) {
-                searchStatus.textContent = '搜索中...';
+                searchStatus.textContent = 'Searching...';
                 searchStatus.className = 'loading';
                 vscode.postMessage({
                     command: 'search',
                     text: text
                 });
             } else if (text.length > 0) {
-                searchStatus.textContent = '请至少输入3个字符...';
+                searchStatus.textContent = 'Please enter at least 3 characters...';
                 searchStatus.className = 'tips';
                 resultsContainer.innerHTML = '';
             } else {
-                searchStatus.textContent = '输入关键词开始搜索 Go 代码...';
+                searchStatus.textContent = 'Enter keywords to search Go code...';
                 searchStatus.className = 'tips';
                 resultsContainer.innerHTML = '';
             }
         }, 300);
         
-        // 监听输入变化
+        // Listen for input changes
         searchInput.addEventListener('input', (e) => {
             handleSearch(e.target.value);
         });
         
-        // 处理文件点击
+        // Handle file click
         function handleFileOpen(filePath, line, column = 0) {
             vscode.postMessage({
                 command: 'openFile',
                 filePath: filePath,
-                line: line - 1, // 转换为0-based
+                line: line - 1, // Convert to 0-based
                 column: column
             });
         }
         
-        // 监听来自扩展的消息
+        // Listen for messages from extension
         window.addEventListener('message', (event) => {
             const message = event.data;
             
             switch (message.command) {
                 case 'searchStarted':
-                    searchStatus.textContent = '搜索中...';
+                    searchStatus.textContent = 'Searching...';
                     searchStatus.className = 'loading';
                     break;
                     
                 case 'searchResults':
                     if (message.results.length === 0) {
-                        searchStatus.textContent = '没有找到匹配 "' + message.searchText + '" 的结果';
+                        searchStatus.textContent = 'No results found for "' + message.searchText + '"';
                         searchStatus.className = 'no-results';
                         resultsContainer.innerHTML = '';
                         return;
                     }
                     
-                    // 处理搜索结果
-                    searchStatus.textContent = '搜索结果: "' + message.searchText + '" (' + message.results.length + '个结果)';
+                    // Process search results
+                    searchStatus.textContent = 'Search results: "' + message.searchText + '" (' + message.results.length + ' results)';
                     searchStatus.className = 'result-group-header';
                     
-                    // 分组结果
+                    // Group results
                     const workspaceResults = message.results.filter(r => r.source === 'workspace');
                     const dependencyResults = message.results.filter(r => r.source === 'dependency');
                     
-                    // 清空结果容器
+                    // Clear results container
                     resultsContainer.innerHTML = '';
                     
-                                            // 添加工作区结果
+                                            // Add workspace results
                     if (workspaceResults.length > 0) {
                         const workspaceGroup = document.createElement('div');
                         workspaceGroup.className = 'result-group';
@@ -218,7 +218,7 @@ export function getWebviewContent(searchText?: string) {
                         const workspaceHeader = document.createElement('div');
                         workspaceHeader.className = 'result-group-header';
                         
-                        // 分析常规文件和测试文件的数量
+                        // Analyze regular and test file counts
                         const nonTestWorkspaceResults = workspaceResults.filter(r => 
                             !r.filePath.endsWith('_test.go')
                         );
@@ -226,9 +226,9 @@ export function getWebviewContent(searchText?: string) {
                             r.filePath.endsWith('_test.go')
                         );
                         
-                        workspaceHeader.textContent = '工作区 (' + workspaceResults.length + 
-                            ', 常规: ' + nonTestWorkspaceResults.length + 
-                            ', 测试: ' + testWorkspaceResults.length + ')';
+                        workspaceHeader.textContent = 'Workspace (' + workspaceResults.length + 
+                            ', Regular: ' + nonTestWorkspaceResults.length + 
+                            ', Tests: ' + testWorkspaceResults.length + ')';
                         workspaceGroup.appendChild(workspaceHeader);
                         
                         workspaceResults.forEach(result => {
@@ -241,7 +241,7 @@ export function getWebviewContent(searchText?: string) {
                             
                             const contentElem = document.createElement('div');
                             contentElem.className = 'result-content';
-                            // 使用innerHTML显示高亮的文本
+                            // Use innerHTML to display highlighted text
                             const safeContent = result.content
                                 .replace(/&/g, '&amp;')
                                 .replace(/</g, '&lt;')
@@ -260,7 +260,7 @@ export function getWebviewContent(searchText?: string) {
                         resultsContainer.appendChild(workspaceGroup);
                     }
                     
-                    // 添加依赖库结果
+                    // Add dependency results
                     if (dependencyResults.length > 0) {
                         const depGroup = document.createElement('div');
                         depGroup.className = 'result-group';
@@ -268,7 +268,7 @@ export function getWebviewContent(searchText?: string) {
                         const depHeader = document.createElement('div');
                         depHeader.className = 'result-group-header';
                         
-                        // 分析常规文件和测试文件的数量
+                        // Analyze regular and test file counts
                         const nonTestDepResults = dependencyResults.filter(r => 
                             !r.filePath.endsWith('_test.go')
                         );
@@ -276,9 +276,9 @@ export function getWebviewContent(searchText?: string) {
                             r.filePath.endsWith('_test.go')
                         );
                         
-                        depHeader.textContent = '依赖库 (' + dependencyResults.length + 
-                            ', 常规: ' + nonTestDepResults.length + 
-                            ', 测试: ' + testDepResults.length + ')';
+                        depHeader.textContent = 'Dependencies (' + dependencyResults.length + 
+                            ', Regular: ' + nonTestDepResults.length + 
+                            ', Tests: ' + testDepResults.length + ')';
                         depGroup.appendChild(depHeader);
                         
                         dependencyResults.forEach(result => {
@@ -295,7 +295,7 @@ export function getWebviewContent(searchText?: string) {
                             
                             const contentElem = document.createElement('div');
                             contentElem.className = 'result-content';
-                            // 使用innerHTML显示高亮的文本
+                            // Use innerHTML to display highlighted text
                             const safeContent = result.content
                                 .replace(/&/g, '&amp;')
                                 .replace(/</g, '&lt;')
@@ -323,12 +323,12 @@ export function getWebviewContent(searchText?: string) {
             }
         });
         
-        // 初始焦点
+        // Initial focus
         setTimeout(() => {
             searchInput.focus();
         }, 100);
         
-        // 初始搜索
+        // Initial search
         if (searchInput.value && searchInput.value.length >= 3) {
             handleSearch(searchInput.value);
         }

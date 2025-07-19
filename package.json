@@ -19,7 +19,7 @@
     "commands": [
       {
         "command": "golang-search.searchInDeps",
-        "title": "在Golang依赖库中搜索"
+        "title": "search golang files and dependencies"
       }
     ]
   },

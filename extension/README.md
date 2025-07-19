@@ -1,36 +1,51 @@
-# Golang库搜索插件
+# Golang Library Search Extension
 
-这个Cursor插件可以帮助您在Golang项目中全局搜索，包括搜索go mod tidy后的依赖库文件内容。
+This Cursor extension helps you search globally across Golang projects, including searching within dependency library files after running go mod tidy.
 
-## 功能
+## Features
 
-- 在Golang项目中搜索依赖库中的代码内容
-- 支持直接跳转到依赖库的代码位置
-- 兼容标准Golang模块项目
+- Search for code content in Golang project dependencies
+- Support direct navigation to dependency library code locations
+- Compatible with standard Golang module projects
+- Display search results in sidebar with highlighted keywords
+- Prioritize non-test files in search results
 
-## 使用方法
+## Usage
 
-1. 打开一个包含`go.mod`文件的Golang项目
-2. 通过命令面板（Cmd+Shift+P）运行"在Golang依赖库中搜索"命令
-3. 输入要搜索的关键字
-4. 查看搜索结果，点击结果可跳转到对应的库文件位置
+1. Open a Golang project containing a `go.mod` file
+2. Run the "search golang files and dependencies" command via the command palette (Cmd+Shift+P)
+3. Enter the keywords to search for
+4. View search results, click on a result to jump to the corresponding library file location
 
-## 要求
+## Requirements
 
-- 需要安装Go语言环境
-- 项目必须是基于Go模块的项目（包含go.mod文件）
-- 需要执行过`go mod tidy`或`go mod download`来下载依赖
+- Go language environment installed
+- Project must be based on Go modules (containing a go.mod file)
+- Dependencies must have been downloaded with `go mod tidy` or `go mod download`
 
-## 实现原理
+## How It Works
 
-插件通过以下步骤实现全局搜索功能：
+The extension implements global search through the following steps:
 
-1. 使用`go env GOMODCACHE`获取Go模块缓存的位置
-2. 使用`go list -m all`获取项目依赖的所有模块
-3. 在模块缓存中使用grep搜索用户指定的关键字
-4. 将搜索结果转换为VSCode/Cursor可以理解的位置信息
-5. 在搜索结果面板中显示匹配项
+1. Uses `go env GOMODCACHE` to get the location of the Go module cache
+2. Uses `go list -m all` to get all modules that the project depends on
+3. Searches for user-specified keywords in the module cache using grep
+4. Converts search results to location information that VSCode/Cursor can understand
+5. Displays matches in the search results panel with highlighted keywords
 
-## 问题反馈
+## Features in Detail
 
-如有问题或建议，请提交issue。 
+- **Real-time Search**: Results update as you type (with debounce)
+- **Workspace + Dependencies**: Searches both workspace files and dependencies
+- **Result Prioritization**: Non-test files are prioritized over test files
+- **Visual Distinction**: Dependency results are marked with a gold border
+- **Keyword Highlighting**: Search terms are highlighted in the results
+- **Sidebar Integration**: Dedicated search view in the activity bar
+- **Statistics**: Shows counts of regular and test files in results
+
+## Feedback
+
+If you have any issues or suggestions, please submit an issue. 
+
+---
+[Chinese Version](./README_cn.md) 

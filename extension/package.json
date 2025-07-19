@@ -1,7 +1,7 @@
 {
   "name": "golang-search",
-  "displayName": "Golang库搜索",
-  "description": "在Golang项目中搜索包括依赖库在内的全部内容",
+  "displayName": "Golang search",
+  "description": "search golang files and dependencies",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.74.0"
@@ -17,17 +17,17 @@
     "commands": [
       {
         "command": "golang-search.searchInDeps",
-        "title": "在Golang依赖库中搜索",
+        "title": "search golang files and dependencies",
         "icon": "$(search)"
       },
       {
         "command": "golang-search.refreshView",
-        "title": "刷新",
+        "title": "refresh",
         "icon": "$(refresh)"
       },
       {
         "command": "golang-search.clearResults",
-        "title": "清除结果",
+        "title": "clear results",
         "icon": "$(clear-all)"
       }
     ],
@@ -35,7 +35,7 @@
       "activitybar": [
         {
           "id": "golang-search",
-          "title": "Go代码搜索",
+          "title": "Go code search",
           "icon": "$(search)"
         }
       ]
@@ -44,7 +44,7 @@
       "golang-search": [
         {
           "id": "golang-search-results",
-          "name": "Go代码搜索",
+          "name": "Go code search",
           "type": "webview"
         }
       ]
@@ -52,7 +52,7 @@
     "viewsWelcome": [
       {
         "view": "golang-search-results",
-        "contents": "没有搜索结果。\n[开始搜索](command:golang-search.searchInDeps)"
+        "contents": "No search results.\n[Start search](command:golang-search.searchInDeps)"
       }
     ],
     "menus": {

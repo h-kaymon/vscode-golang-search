@@ -5,49 +5,8 @@
 安装此插件需要以下工具：
 
 1. Node.js 和 npm (推荐使用 Node.js v14 或更新版本)
-2. Go语言环境 (推荐 Go 1.16 或更新版本)
+2. Go语言环境
 3. VS Code或Cursor编辑器
-
-## 安装步骤
-
-### 1. 安装开发依赖
-
-```bash
-# 进入插件目录
-cd extension
-
-# 安装依赖
-npm install
-```
-
-### 2. 编译插件
-
-```bash
-# 编译插件
-npm run compile
-# 或打包插件
-npm run package
-```
-
-### 3. 安装插件到VS Code/Cursor
-
-#### 方法1：从VSIX文件安装
-
-1. 打包插件生成VSIX文件
-```bash
-npm run package
-```
-
-2. 在VS Code/Cursor中，从扩展视图的更多选项菜单中选择"从VSIX安装..."
-3. 浏览到生成的VSIX文件并安装
-
-#### 方法2：开发模式安装
-
-1. 复制整个插件文件夹到以下位置：
-   - Windows: `%USERPROFILE%\.vscode\extensions`
-   - Mac/Linux: `~/.vscode/extensions`
-
-2. 重启VS Code/Cursor
 
 ## 使用方法
 

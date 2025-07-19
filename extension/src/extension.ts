@@ -6,7 +6,7 @@ import * as os from 'os';
 import * as util from 'util';
 import { getWebviewContent } from './webview';
 
-// 声明console对象以解决类型错误
+// Declare console object to resolve type errors
 declare var console: {
     log(message?: any, ...optionalParams: any[]): void;
     error(message?: any, ...optionalParams: any[]): void;
@@ -14,59 +14,59 @@ declare var console: {
     info(message?: any, ...optionalParams: any[]): void;
 };
 
-// 将子进程的exec转换为Promise形式
+// Convert exec to Promise form
 const execPromise = util.promisify(cp.exec);
 
-// 获取Go模块的依赖路径
+// Get Go module cache path
 async function getGoModCachePath(): Promise<string> {
     try {
         const { stdout } = await execPromise('go env GOMODCACHE');
         return stdout.trim();
     } catch (error) {
-        console.error('获取GOMODCACHE失败:', error);
-        // 失败时返回默认路径
+        console.error('get GOMODCACHE failed:', error);
+        // Return default path on failure
         return path.join(os.homedir(), 'go', 'pkg', 'mod');
     }
 }
 
-// 获取项目的依赖模块
+// Get project dependencies
 async function getProjectDependencies(workspaceDir: string): Promise<string[]> {
     try {
-        // 确保在工作空间目录执行命令
+        // Ensure command runs in workspace directory
         const options = { cwd: workspaceDir };
         const { stdout } = await execPromise('go list -m all', options);
         
-        // 解析输出，移除主模块（第一行）
+        // Parse output, remove main module (first line)
         const modules = stdout.split('\n').filter(Boolean);
         if (modules.length > 0) {
-            // 第一个模块通常是项目本身
+            // First module is usually the project itself
             return modules.slice(1);
         }
         return [];
     } catch (error) {
-        console.error('获取项目依赖失败:', error);
+        console.error('get project dependencies failed:', error);
         return [];
     }
 }
 
-// 定义搜索结果来源类型
+// Define search result source type
 enum ResultSource {
     Dependency = 'dependency',
     Workspace = 'workspace'
 }
 
-// 定义搜索结果类型
+// Define search result type
 interface SearchResult {
     location: vscode.Location;
     content: string;
-    source: ResultSource; // 标记结果来自依赖库还是工作区
+    source: ResultSource; // Mark if result is from dependency or workspace
 }
 
-// 全局存储搜索结果
+// Global storage for search results
 let lastSearchResults: SearchResult[] = [];
 let lastSearchText: string = '';
 
-// 搜索视图提供程序 - 使用WebviewView实现带搜索框的视图
+// Search view provider - Using WebviewView to implement search box
 class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'golang-search-results';
     private _view?: vscode.WebviewView;
@@ -95,7 +95,7 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
         
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
         
-        // 监听来自Webview的消息
+        // Listen for messages from Webview
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.command) {
                 case 'search':
@@ -119,7 +119,7 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
         });
     }
     
-    // 执行搜索并更新结果
+    // Execute search and update results
     private async performSearch(searchText: string) {
         if (!this._view) {
             return;
@@ -128,12 +128,12 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
         this._view.webview.postMessage({ command: 'searchStarted' });
         
         try {
-            // 获取当前工作空间
+            // Get current workspace
             const workspaceFolders = vscode.workspace.workspaceFolders;
             if (!workspaceFolders || workspaceFolders.length === 0) {
                 this._view.webview.postMessage({ 
                     command: 'searchError', 
-                    message: '请先打开一个Go项目工作空间' 
+                    message: 'Please open a Go project workspace first' 
                 });
                 return;
             }
@@ -144,18 +144,18 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
             if (!fs.existsSync(goModPath)) {
                 this._view.webview.postMessage({ 
                     command: 'searchError', 
-                    message: '当前工作空间不是有效的Go模块项目' 
+                    message: 'current workspace is not a valid Go module project' 
                 });
                 return;
             }
             
-                            // 同时搜索工作区和依赖库
+                            // Search both workspace and dependencies
                 const [workspaceResults, dependencyResults] = await Promise.all([
                     searchInWorkspace(workspaceDir, searchText),
                     searchInDependencies(workspaceDir, searchText)
                 ]);
                 
-                // 对每个结果集单独排序，非测试文件优先
+                // Sort each result set separately, prioritizing non-test files
                 const sortWorkspaceResults = (a: SearchResult, b: SearchResult) => {
                     const aIsTest = a.location.uri.fsPath.endsWith('_test.go');
                     const bIsTest = b.location.uri.fsPath.endsWith('_test.go');
@@ -164,22 +164,22 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
                     return 0;
                 };
                 
-                // 确保结果集内部也是按照非测试文件优先排序
+                // Ensure results are sorted with non-test files first within each group
                 const sortedWorkspaceResults = [...workspaceResults].sort(sortWorkspaceResults);
                 const sortedDependencyResults = [...dependencyResults].sort(sortWorkspaceResults);
                 
-                // 合并结果 - 工作区优先，且每个分组中非测试文件优先
+                // Combine results - workspace first, with non-test files prioritized in each group
                 const results = [...sortedWorkspaceResults, ...sortedDependencyResults];
                 
-                // 保存搜索结果以供树视图使用
+                // Save search results for tree view
                 lastSearchResults = results;
                 lastSearchText = searchText;
             
-            // 刷新树视图
+            // Refresh tree view
             this._searchResultsProvider.refresh();
             vscode.commands.executeCommand('setContext', 'golang-search.hasResults', true);
             
-            // 格式化结果并发送给webview
+            // Format results and send to webview
             const goModCachePath = await getGoModCachePath();
             const formattedResults = results.map(result => {
                 const location = result.location;
@@ -187,7 +187,7 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
                 const fileName = path.basename(filePath);
                 const lineNumber = location.range.start.line + 1;
                 
-                // 简化文件路径，去掉 Go 模块缓存路径前缀
+                // Simplify file path by removing Go module cache prefix
                 let simplifiedPath = filePath;
                 const prefixToRemove = goModCachePath + '/';
                 if (result.source === ResultSource.Dependency && simplifiedPath.startsWith(prefixToRemove)) {
@@ -220,7 +220,7 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
         }
     }
     
-             // 生成Webview HTML内容
+             // Generate Webview HTML content
     private _getHtmlForWebview(webview: vscode.Webview): string {
         return getWebviewContent(lastSearchText);
     }
@@ -249,12 +249,12 @@ class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultIte
         if (lastSearchResults.length === 0) {
             // 如果没有搜索结果，显示一个提示信息
             const noResultsItem = new SearchResultItem(
-                "点击此处开始搜索",
+                "click here to start search",
                 vscode.TreeItemCollapsibleState.None,
                 undefined,
                 {
                     command: 'golang-search.searchInDeps',
-                    title: '开始搜索'
+                    title: 'start search'
                 }
             );
             noResultsItem.iconPath = new vscode.ThemeIcon('search');
@@ -270,12 +270,12 @@ class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultIte
         
         // 添加搜索信息头
         const searchInfoItem = new SearchResultItem(
-            `搜索: "${lastSearchText}" (${lastSearchResults.length}个结果)`,
+            `search: "${lastSearchText}" (${lastSearchResults.length} results)`,
             vscode.TreeItemCollapsibleState.Expanded,
             undefined,
             {
                 command: 'golang-search.searchInDeps',
-                title: '重新搜索'
+                title: 're-search'
             }
         );
         searchInfoItem.contextValue = 'searchInfo';
@@ -284,7 +284,7 @@ class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultIte
         // 添加工作区结果
         if (workspaceResults.length > 0) {
             const workspaceHeader = new SearchResultItem(
-                `工作区 (${workspaceResults.length})`,
+                `workspace (${workspaceResults.length})`,
                 vscode.TreeItemCollapsibleState.Expanded
             );
             workspaceHeader.contextValue = 'workspaceHeader';
@@ -301,7 +301,7 @@ class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultIte
                     result.content,
                     {
                         command: 'golang-search.openFile',
-                        title: '打开文件',
+                        title: 'open file',
                         arguments: [result.location]
                     }
                 );
@@ -314,7 +314,7 @@ class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultIte
         // 添加依赖库结果
         if (dependencyResults.length > 0) {
             const depHeader = new SearchResultItem(
-                `依赖库 (${dependencyResults.length})`,
+                `dependencies (${dependencyResults.length})`,
                 vscode.TreeItemCollapsibleState.Expanded
             );
             depHeader.contextValue = 'dependencyHeader';
@@ -331,7 +331,7 @@ class GoSearchResultsProvider implements vscode.TreeDataProvider<SearchResultIte
                     result.content,
                     {
                         command: 'golang-search.openFile',
-                        title: '打开文件',
+                        title: 'open file',
                         arguments: [result.location]
                     }
                 );
@@ -365,34 +365,34 @@ async function searchInWorkspace(workspaceDir: string, searchText: string): Prom
     const results: SearchResult[] = [];
     
     try {
-        // 首先检查目录是否存在
+        // First check if directory exists
         if (!fs.existsSync(workspaceDir)) {
-            console.log('工作区目录不存在:', workspaceDir);
+            console.log('workspace directory not found:', workspaceDir);
             return results;
         }
         
-        // 检查目录中是否有 .go 文件
+        // Check if directory has .go files
         try {
-            // 使用 find 命令检查是否有 Go 文件存在
+            // Use find command to check if Go files exist
             const checkCommand = `find "${workspaceDir}" -name "*.go" -type f -print -quit`;
             const { stdout: checkResult } = await execPromise(checkCommand);
             
             if (!checkResult.trim()) {
-                console.log('工作区没有Go文件:', workspaceDir);
+                console.log('workspace has no Go files:', workspaceDir);
                 return results;
             }
         } catch (checkError) {
-            console.log('检查Go文件失败:', checkError);
-            // 继续尝试搜索，即使检查失败
+            console.log('check Go files failed:', checkError);
+            // Continue trying to search, even if check failed
         }
         
-        // 在工作区目录中执行grep命令
+        // Run grep command in workspace directory
         try {
             const grepCommand = `grep -rn "${searchText}" --include="*.go" "${workspaceDir}"`;
             
             const { stdout } = await execPromise(grepCommand);
             if (!stdout.trim()) {
-                // 没有搜索结果
+                // No search results
                 return results;
             }
             
@@ -401,55 +401,55 @@ async function searchInWorkspace(workspaceDir: string, searchText: string): Prom
             const testResults: SearchResult[] = [];
             
             for (const line of lines) {
-                // 尝试匹配带行号的格式: 文件路径:行号:内容
+                // Try to match format with line numbers: file path:line number:content
                 const match = line.match(/^(.+):(\d+):(.*)/);
                 if (match) {
                     const [, filePath, lineStr, content] = match;
-                    const lineNumber = parseInt(lineStr, 10) - 1; // VSCode行号从0开始
+                    const lineNumber = parseInt(lineStr, 10) - 1; // VSCode line numbers start at 0
                     const uri = vscode.Uri.file(filePath);
                     const position = new vscode.Position(lineNumber, 0);
                     const range = new vscode.Range(position, position);
                     
-                    // 创建一个包含位置、内容和来源的对象
+                    // Create an object containing position, content, and source
                     const locationWithContent = {
                         location: new vscode.Location(uri, range),
                         content: content.trim(),
-                        source: ResultSource.Workspace // 标记为工作区来源
+                        source: ResultSource.Workspace // Mark as workspace source
                     };
                     
-                    // 检查文件是否是测试文件 (以 _test.go 结尾)
+                    // Check if file is a test file (ends with _test.go)
                     if (filePath.endsWith('_test.go')) {
                         testResults.push(locationWithContent);
                     } else {
                         nonTestResults.push(locationWithContent);
                     }
                     
-                    // 如果结果总数已经超过50个，则停止添加
+                    // If total results exceed 50, stop adding
                     if (nonTestResults.length + testResults.length >= 50) {
                         break;
                     }
                 }
             }
             
-            // 先添加非测试文件结果，再添加测试文件结果
+            // Add non-test file results first, then test file results
             results.push(...nonTestResults, ...testResults);
-            // 限制结果数量为50
+            // Limit results to 50
             return results.slice(0, 50);
             
         } catch (grepError) {
-            // grep没有结果时可能会返回错误，这是正常的
-            console.log('grep搜索结果为空或出错:', grepError);
-            // 出错时返回空结果
+            // It's normal for grep to return an error when there are no results
+            console.log('grep search results are empty or error:', grepError);
+            // Return empty results on error
             return results;
         }
     } catch (error) {
-        console.log('工作区搜索整体失败:', error);
+        console.log('workspace search failed:', error);
     }
     
     return results;
 }
 
-// 搜索依赖库中的内容
+// Search content in dependencies
 async function searchInDependencies(workspaceDir: string, searchText: string): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
     const nonTestResults: SearchResult[] = [];
@@ -458,116 +458,116 @@ async function searchInDependencies(workspaceDir: string, searchText: string): P
     try {
         const goModCachePath = await getGoModCachePath();
         if (!goModCachePath || !fs.existsSync(goModCachePath)) {
-            console.log('Go模块缓存路径不存在:', goModCachePath);
+            console.log('Go module cache path not found:', goModCachePath);
             return results;
         }
         
         const dependencies = await getProjectDependencies(workspaceDir);
         if (dependencies.length === 0) {
-            console.log('项目没有依赖模块');
+            console.log('project has no dependencies');
             return results;
         }
         
-        // 遍历所有依赖
+        // Iterate through all dependencies
         for (const dep of dependencies) {
             const [moduleName, version] = dep.split(' ');
             if (!version) continue;
             
-            // 构建模块在缓存中的路径
+            // Build module path in cache
             const modulePath = path.join(goModCachePath, `${moduleName}@${version}`);
             if (fs.existsSync(modulePath)) {
-                // 使用go工具搜索依赖中的关键字
+                // Use go tools to search for keywords in dependencies
                 try {
-                    // 在模块目录中执行grep命令 - 使用双引号包裹路径，避免空格和特殊字符问题
+                    // Run grep command in module directory - use quotes to handle spaces and special characters
                     const grepCommand = `grep -rn "${searchText}" --include="*.go" "${modulePath}"`;
                     
                     const { stdout } = await execPromise(grepCommand);
                     if (!stdout.trim()) {
-                        // 没有搜索结果
+                        // No search results
                         continue;
                     }
                     
                     const topLines = stdout.split('\n').filter(Boolean);
                     for (const line of topLines) {
                         
-                        // 尝试匹配带行号的格式: 文件路径:行号:内容
+                        // Try to match format with line numbers: file path:line number:content
                         const match = line.match(/^(.+):(\d+):(.*)/);
                         if (match) {
                             const [, filePath, lineStr, content] = match;
-                            const lineNumber = parseInt(lineStr, 10) - 1; // VSCode行号从0开始
+                            const lineNumber = parseInt(lineStr, 10) - 1; // VSCode line numbers start at 0
                             const uri = vscode.Uri.file(filePath);
                             const position = new vscode.Position(lineNumber, 0);
                             const range = new vscode.Range(position, position);
                             
-                            // 创建一个包含位置、内容和来源的对象
+                            // Create an object containing position, content, and source
                             const locationWithContent = {
                                 location: new vscode.Location(uri, range),
                                 content: content.trim(),
-                                source: ResultSource.Dependency // 标记为依赖库来源
+                                source: ResultSource.Dependency // Mark as dependency source
                             };
                             
-                            // 检查文件是否是测试文件 (以 _test.go 结尾)
+                            // Check if file is a test file (ends with _test.go)
                             if (filePath.endsWith('_test.go')) {
                                 testResults.push(locationWithContent);
                             } else {
                                 nonTestResults.push(locationWithContent);
                             }
                             
-                            // 如果结果总数已经达到了50个，则停止添加
+                            // If total results reach 50, stop adding
                             if (nonTestResults.length + testResults.length >= 50) {
-                                // 优先返回非测试文件
+                                // Prioritize non-test files
                                 results.push(...nonTestResults, ...testResults);
                                 return results.slice(0, 50); 
                             }
                         }
                     }
                 } catch (error) {
-                    // grep没有结果时会返回错误，这是正常的
-                    // console.log(`模块 ${moduleName} 中没有找到匹配项:`, error);
+                    // It's normal for grep to return an error when there are no results
+                    // console.log(`No matches found in module ${moduleName}:`, error);
                 }
             } else {
-                // 模块路径不存在，跳过
-                // console.log(`模块路径不存在: ${modulePath}`);
+                // Module path doesn't exist, skip
+                // console.log(`Module path doesn't exist: ${modulePath}`);
             }
         }
         
-        // 优先返回非测试文件的结果
+        // Prioritize non-test file results
         results.push(...nonTestResults, ...testResults);
         return results.slice(0, 50);
         
     } catch (error) {
-        console.error('搜索依赖库失败:', error);
+        console.error('search dependencies failed:', error);
     }
     
     return results;
 }
 
 export function activate(context: vscode.ExtensionContext) {
-    // 确保上下文变量初始化，即使没有搜索结果
+    // Initialize context variable, even if no search results
     vscode.commands.executeCommand('setContext', 'golang-search.hasResults', false);
     
-    // 创建树视图提供者（用于兼容性保留）
+    // Create tree view provider (kept for compatibility)
     const searchResultsProvider = new GoSearchResultsProvider();
     
-    // 创建Webview视图提供者
+    // Create Webview view provider
     const webviewProvider = new GoSearchWebviewProvider(context.extensionUri, searchResultsProvider);
     
-    // 注册Webview视图
+    // Register Webview view
     const searchResultsWebview = vscode.window.registerWebviewViewProvider(
         GoSearchWebviewProvider.viewType,
         webviewProvider,
         {
             webviewOptions: {
-                retainContextWhenHidden: true,  // 保留Webview状态，提高用户体验
+                retainContextWhenHidden: true,  // Retain Webview state to improve user experience
             }
         }
     );
     
-    // 注册命令: 打开文件
+    // Register command: Open file
     const openFileCommand = vscode.commands.registerCommand('golang-search.openFile', async (location: vscode.Location) => {
         try {
             if (!location || !location.uri) {
-                vscode.window.showErrorMessage('无效的文件位置');
+                vscode.window.showErrorMessage('invalid file location');
                 return;
             }
             
@@ -579,16 +579,16 @@ export function activate(context: vscode.ExtensionContext) {
             editor.selection = new vscode.Selection(range.start, range.start);
             editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
         } catch (error) {
-            vscode.window.showErrorMessage(`无法打开文件: ${error}`);
+            vscode.window.showErrorMessage(`cannot open file: ${error}`);
         }
     });
     
-    // 注册命令: 刷新视图
+    // Register command: Refresh view
     const refreshViewCommand = vscode.commands.registerCommand('golang-search.refreshView', () => {
         searchResultsProvider.refresh();
     });
     
-    // 注册命令: 清除搜索结果
+    // Register command: Clear search results
     const clearResultsCommand = vscode.commands.registerCommand('golang-search.clearResults', () => {
         lastSearchResults = [];
         lastSearchText = '';
@@ -596,7 +596,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.executeCommand('setContext', 'golang-search.hasResults', false);
     });
     
-    // 添加命令和视图到上下文
+    // Add commands and views to context
     context.subscriptions.push(
         openFileCommand,
         refreshViewCommand,
@@ -604,12 +604,12 @@ export function activate(context: vscode.ExtensionContext) {
         searchResultsWebview
     );
     
-    // 注册搜索命令
+    // Register search command
     const searchCommand = vscode.commands.registerCommand('golang-search.searchInDeps', async () => {
-        // 获取当前工作空间
+        // Get current workspace
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders || workspaceFolders.length === 0) {
-            vscode.window.showErrorMessage('请先打开一个Go项目工作空间');
+            vscode.window.showErrorMessage('Please open a Go project workspace first');
             return;
         }
         
@@ -618,14 +618,14 @@ export function activate(context: vscode.ExtensionContext) {
         const goModPath = path.join(workspaceDir, 'go.mod');
         
         if (!fs.existsSync(goModPath)) {
-            vscode.window.showErrorMessage('当前工作空间不是有效的Go模块项目');
+            vscode.window.showErrorMessage('current workspace is not a valid Go module project');
             return;
         }
         
         // 创建QuickPick用于实时搜索
         const quickPick = vscode.window.createQuickPick();
-        quickPick.placeholder = '在Go依赖库中搜索';
-        quickPick.title = '输入关键字进行实时搜索';
+        quickPick.placeholder = 'search in Go dependencies';
+        quickPick.title = 'input keyword to search';
         quickPick.busy = false;
         quickPick.canSelectMany = false;
         quickPick.matchOnDescription = true;
@@ -636,12 +636,12 @@ export function activate(context: vscode.ExtensionContext) {
         
         // 监听输入变化
         quickPick.onDidChangeValue((value) => {
-            console.log('输入变化:', value);
+            console.log('input changed:', value);
             
             if (value.length < 3) {
                 quickPick.items = [];
                 quickPick.busy = false;
-                return; // 至少3个字符才开始搜索
+                return; // at least 3 characters to start search
             }
             
             // 设置忙碌状态
@@ -725,7 +725,7 @@ export function activate(context: vscode.ExtensionContext) {
                             // 设置图标按钮
                             (item as any).buttons = [{ 
                                 iconPath: new vscode.ThemeIcon('library'),
-                                tooltip: '依赖库结果'
+                                tooltip: 'library results'
                             }];
                         }
                         
@@ -756,12 +756,12 @@ export function activate(context: vscode.ExtensionContext) {
                     quickPick.items = sortedItems;        
                     
                     if (sortedItems.length === 0) {
-                        quickPick.items = [{ label: `没有找到匹配 "${value}" 的结果` }];
+                        quickPick.items = [{ label: `no results found for "${value}"` }];
                     }
                     
                 } catch (error) {
-                    console.error('实时搜索错误:', error);
-                    quickPick.items = [{ label: `搜索错误: ${error}` }];
+                    console.error('search error:', error);
+                    quickPick.items = [{ label: `search error: ${error}` }];
                 } finally {
                     quickPick.busy = false;
                 }
@@ -776,16 +776,16 @@ export function activate(context: vscode.ExtensionContext) {
                     // 检查文件是否存在和路径是否有效
                     const filePath = selected.location.uri.fsPath;
                     if (!filePath || !fs.existsSync(filePath)) {
-                        console.log('文件不存在或路径无效:', filePath);
-                        vscode.window.showErrorMessage(`文件不存在或无法访问: ${path.basename(filePath || '')}`);
+                        console.log('file not found or path is invalid:', filePath);
+                        vscode.window.showErrorMessage(`file not found or cannot be accessed: ${path.basename(filePath || '')}`);
                         return;
                     }
                     
                     // 检查文件类型和打开文件
                     const stats = fs.statSync(filePath);
                     if (!stats.isFile()) {
-                        console.log('路径不是有效的文件:', filePath);
-                        vscode.window.showErrorMessage(`路径不是有效的文件: ${path.basename(filePath)}`);
+                        console.log('path is not a valid file:', filePath);
+                        vscode.window.showErrorMessage(`path is not a valid file: ${path.basename(filePath)}`);
                         return;
                     }
                     
@@ -801,8 +801,8 @@ export function activate(context: vscode.ExtensionContext) {
                     // 关闭QuickPick
                     quickPick.dispose();
                 } catch (error) {
-                    console.error('打开文件失败:', error);
-                    vscode.window.showErrorMessage(`无法打开文件: ${error}`);
+                    console.error('open file failed:', error);
+                    vscode.window.showErrorMessage(`cannot open file: ${error}`);
                 }
             }
         });
@@ -815,16 +815,16 @@ export function activate(context: vscode.ExtensionContext) {
                     // 检查文件是否存在和路径是否有效
                     const filePath = selected.location.uri.fsPath;
                     if (!filePath || !fs.existsSync(filePath)) {
-                        console.log('文件不存在或路径无效:', filePath);
-                        vscode.window.showErrorMessage(`文件不存在或无法访问: ${path.basename(filePath || '')}`);
+                        console.log('file not found or path is invalid:', filePath);
+                        vscode.window.showErrorMessage(`file not found or cannot be accessed: ${path.basename(filePath || '')}`);
                         return;
                     }
                     
                     // 检查文件类型和打开文件
                     const stats = fs.statSync(filePath);
                     if (!stats.isFile()) {
-                        console.log('路径不是有效的文件:', filePath);
-                        vscode.window.showErrorMessage(`路径不是有效的文件: ${path.basename(filePath)}`);
+                        console.log('path is not a valid file:', filePath);
+                        vscode.window.showErrorMessage(`path is not a valid file: ${path.basename(filePath)}`);
                         return;
                     }
                     
@@ -840,8 +840,8 @@ export function activate(context: vscode.ExtensionContext) {
                     // 关闭QuickPick
                     quickPick.dispose();
                 } catch (error) {
-                    console.error('打开文件失败:', error);
-                    vscode.window.showErrorMessage(`无法打开文件: ${error}`);
+                    console.error('open file failed:', error); 
+                    vscode.window.showErrorMessage(`cannot open file: ${error}`);
                 }
             }
         });
@@ -849,8 +849,8 @@ export function activate(context: vscode.ExtensionContext) {
         // 设置初始 items
         quickPick.items = [
             {
-                label: '请输入搜索关键字...',
-                description: '至少输入3个字符开始搜索',
+                label: 'input search keyword...',
+                description: 'at least 3 characters to start search',
                 detail: ''
             }
         ];
