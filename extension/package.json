@@ -27,25 +27,34 @@
     "Other"
   ],
   "activationEvents": [
-    "*"
+    "onCommand:golang-search.search",
+    "onCommand:golang-search.searchInView",
+    "onCommand:golang-search.rebuildIndex",
+    "onCommand:golang-search.showWorkspaceIndexes",
+    "onView:golangSearchView"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "golang-search.searchInDeps",
-        "title": "search golang files and dependencies",
+        "command": "golang-search.search",
+        "title": "Search Go Files and Dependencies",
         "icon": "$(search)"
       },
       {
-        "command": "golang-search.refreshView",
-        "title": "refresh",
+        "command": "golang-search.searchInView",
+        "title": "Open Go Search View",
+        "icon": "$(search)"
+      },
+      {
+        "command": "golang-search.rebuildIndex",
+        "title": "Rebuild Go Search Index",
         "icon": "$(refresh)"
       },
       {
-        "command": "golang-search.clearResults",
-        "title": "clear results",
-        "icon": "$(clear-all)"
+        "command": "golang-search.showWorkspaceIndexes",
+        "title": "Manage Workspace Search Indexes",
+        "icon": "$(database)"
       }
     ],
     "viewsContainers": {
@@ -60,33 +69,33 @@
     "views": {
       "golang-search": [
         {
-          "id": "golang-search-results",
-          "name": "Go code search",
+          "id": "golangSearchView",
+          "name": "Go Search",
           "type": "webview"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "golang-search-results",
-        "contents": "No search results.\n[Start search](command:golang-search.searchInDeps)"
+        "view": "golangSearchView",
+        "contents": "Enter keywords to search Go code and dependencies.\n[Search](command:golang-search.search)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "golang-search.searchInDeps",
-          "when": "view == golang-search-results",
+          "command": "golang-search.search",
+          "when": "view == golangSearchView",
           "group": "navigation"
         },
         {
-          "command": "golang-search.refreshView",
-          "when": "view == golang-search-results",
+          "command": "golang-search.rebuildIndex",
+          "when": "view == golangSearchView",
           "group": "navigation"
         },
         {
-          "command": "golang-search.clearResults",
-          "when": "view == golang-search-results",
+          "command": "golang-search.showWorkspaceIndexes",
+          "when": "view == golangSearchView",
           "group": "navigation"
         }
       ]
