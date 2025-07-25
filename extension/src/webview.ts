@@ -1,149 +1,294 @@
 // Generate webview HTML content
 export function getWebviewContent(): string {
-    // Move script content to a separate variable to avoid escaping issues
-    const scriptContent = `
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go Search</title>
+    <style>
+        body {
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-foreground);
+            background-color: var(--vscode-editor-background);
+            margin: 0;
+            padding: 10px;
+        }
+        
+        .search-container {
+            margin-bottom: 15px;
+        }
+        
+        .search-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        
+        #searchInput {
+            flex: 1;
+            padding: 6px 8px;
+            border: 1px solid var(--vscode-input-border);
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border-radius: 2px;
+            font-size: var(--vscode-font-size);
+        }
+        
+        #searchInput:focus {
+            outline: 1px solid var(--vscode-focusBorder);
+            border-color: var(--vscode-focusBorder);
+        }
+        
+        .fuzzy-toggle {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .fuzzy-toggle input[type="checkbox"] {
+            margin: 0;
+        }
+        
+        .search-mode {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            padding: 2px 6px;
+            background-color: var(--vscode-badge-background);
+            border-radius: 10px;
+            white-space: nowrap;
+        }
+        
+        .results-container {
+            max-height: calc(100vh - 120px);
+            overflow-y: auto;
+        }
+        
+        .result-group {
+            margin-bottom: 15px;
+        }
+        
+        .result-group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            margin-bottom: 8px;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        
+        .result-item {
+            padding: 6px 8px;
+            margin-bottom: 4px;
+            border: 1px solid transparent;
+            border-radius: 3px;
+            cursor: pointer;
+            background-color: var(--vscode-list-inactiveSelectionBackground);
+        }
+        
+        .result-item:hover {
+            background-color: var(--vscode-list-hoverBackground);
+            border-color: var(--vscode-list-hoverBackground);
+        }
+        
+        .result-item.dependency {
+            border-left: 3px solid #DAA520;
+        }
+        
+        .result-item.test {
+            border-left: 3px solid #6495ED;
+        }
+        
+        .result-item.stdlib {
+            border-left: 3px solid #32CD32;
+        }
+        
+        .result-content {
+            font-family: var(--vscode-editor-font-family);
+            font-size: var(--vscode-editor-font-size);
+            line-height: 1.3;
+            margin-bottom: 4px;
+            word-break: break-all;
+        }
+        
+        .result-location {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+        }
+        
+        .result-file {
+            color: var(--vscode-textLink-foreground);
+            font-weight: bold;
+        }
+        
+        .result-path {
+            color: var(--vscode-descriptionForeground);
+            text-overflow: ellipsis;
+            overflow: hidden;
+            white-space: nowrap;
+            max-width: 200px;
+        }
+        
+        .tag {
+            padding: 1px 4px;
+            border-radius: 2px;
+            font-size: 10px;
+            margin-left: 4px;
+        }
+        
+        .tag.test {
+            background-color: #6495ED;
+            color: white;
+        }
+        
+        .tag.dependency {
+            background-color: #DAA520;
+            color: white;
+        }
+        
+        .tag.stdlib {
+            background-color: #32CD32;
+            color: white;
+        }
+        
+        .highlight {
+            background-color: var(--vscode-editor-findMatchHighlightBackground);
+            color: var(--vscode-editor-findMatchHighlightForeground);
+        }
+        
+        .loading, .no-results, .error {
+            text-align: center;
+            padding: 20px;
+            color: var(--vscode-descriptionForeground);
+            font-style: italic;
+        }
+        
+        .error {
+            color: var(--vscode-errorForeground);
+        }
+        
+        .info {
+            text-align: center;
+            padding: 15px;
+            color: var(--vscode-descriptionForeground);
+            font-style: italic;
+            border-radius: 4px;
+            background-color: var(--vscode-inputValidation-infoBackground);
+            border: 1px solid var(--vscode-inputValidation-infoBorder);
+        }
+        
+        .info.building {
+            color: var(--vscode-progressBar-background);
+            background-color: var(--vscode-editor-inactiveSelectionBackground);
+        }
+        
+        .info.warning {
+            color: var(--vscode-inputValidation-warningForeground);
+            background-color: var(--vscode-inputValidation-warningBackground);
+            border-color: var(--vscode-inputValidation-warningBorder);
+        }
+        
+        .index-status {
+            text-align: center;
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            background-color: var(--vscode-badge-background);
+            border-radius: 12px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="search-container">
+        <div class="search-controls">
+            <input type="text" id="searchInput" placeholder="Search in Go files and dependencies (min 2 characters)..." />
+            <label class="fuzzy-toggle">
+                <input type="checkbox" id="fuzzyCheckbox" />
+                Fuzzy
+            </label>
+            <span class="search-mode" id="searchMode">Exact</span>
+        </div>
+    </div>
+    
+    <div id="results" class="results-container">
+        <div class="no-results">Enter search term to start searching...</div>
+    </div>
+
+    <script>
+        ${getScriptContent()}
+    </script>
+</body>
+</html>`;
+}
+
+function getScriptContent(): string {
+    return `
         const vscode = acquireVsCodeApi();
-        const searchInput = document.getElementById('searchInput');
-        const resultsContainer = document.getElementById('results');
-        const loadingDiv = document.getElementById('loading');
-        const errorDiv = document.getElementById('error');
-        
-        let searchTimeout;
+        let debounceTimeout;
         let currentSearchText = '';
+        let isFuzzy = false;
         
-        // Handle search input
+        const searchInput = document.getElementById('searchInput');
+        const fuzzyCheckbox = document.getElementById('fuzzyCheckbox');
+        const searchMode = document.getElementById('searchMode');
+        const resultsDiv = document.getElementById('results');
+        
+        function updateSearchMode() {
+            isFuzzy = fuzzyCheckbox.checked;
+            searchMode.textContent = isFuzzy ? 'Fuzzy' : 'Exact';
+            searchMode.style.backgroundColor = isFuzzy ? 'var(--vscode-button-background)' : 'var(--vscode-badge-background)';
+            
+            // Re-trigger search if there's current text
+            if (currentSearchText.length >= 2) {
+                performSearch(currentSearchText);
+            }
+        }
+        
+        function debounce(func, wait) {
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(debounceTimeout);
+                    func(...args);
+                };
+                clearTimeout(debounceTimeout);
+                debounceTimeout = setTimeout(later, wait);
+            };
+        }
+        
+        function performSearch(searchText) {
+            currentSearchText = searchText;
+            if (searchText.length < 2) {
+                resultsDiv.innerHTML = '<div class="no-results">Enter at least 2 characters to search...</div>';
+                return;
+            }
+            
+            resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
+            vscode.postMessage({
+                type: 'search',
+                value: searchText,
+                fuzzy: isFuzzy
+            });
+        }
+        
+        const debouncedSearch = debounce(performSearch, 300);
+        
         searchInput.addEventListener('input', (e) => {
-            const value = e.target.value.trim();
-            
-            if (value.length < 2) {
-                resultsContainer.innerHTML = '<div class="empty-state"><svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 8C13.268 8 7 14.268 7 22C7 29.732 13.268 36 21 36C24.752 36 28.116 34.46 30.504 31.896L38.304 39.696C38.5 39.892 38.756 40 39.024 40C39.292 40 39.548 39.892 39.744 39.696C40.136 39.304 40.136 38.668 39.744 38.276L31.944 30.476C34.476 28.084 36 24.748 36 21C36 13.268 29.732 7 22 7L21 8ZM21 10C28.168 10 34 15.832 34 23C34 30.168 28.168 36 21 36C13.832 36 8 30.168 8 23C8 15.832 13.832 10 21 10Z" fill="currentColor" opacity="0.5"/></svg><div>Enter at least 2 characters to search</div></div>';
-                return;
-            }
-            
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => {
-                currentSearchText = value;
-                vscode.postMessage({
-                    type: 'search',
-                    value: value
-                });
-            }, 300);
+            debouncedSearch(e.target.value);
         });
         
-        // Handle messages from extension
-        window.addEventListener('message', event => {
-            const message = event.data;
-            
-            switch (message.type) {
-                case 'searchStart':
-                    loadingDiv.classList.add('active');
-                    errorDiv.style.display = 'none';
-                    resultsContainer.innerHTML = '';
-                    break;
-                    
-                case 'searchResults':
-                    loadingDiv.classList.remove('active');
-                    displayResults(message.results, message.searchText);
-                    break;
-                    
-                case 'searchError':
-                    loadingDiv.classList.remove('active');
-                    errorDiv.style.display = 'block';
-                    errorDiv.textContent = message.error;
-                    resultsContainer.innerHTML = '';
-                    break;
-            }
-        });
-        
-        function displayResults(results, searchText) {
-            if (!results || results.length === 0) {
-                resultsContainer.innerHTML = '<div class="empty-state"><svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M24 12C18.48 12 14 16.48 14 22C14 27.52 18.48 32 24 32C29.52 32 34 27.52 34 22C34 16.48 29.52 12 24 12ZM24 30C19.58 30 16 26.42 16 22C16 17.58 19.58 14 24 14C28.42 14 32 17.58 32 22C32 26.42 28.42 30 24 30Z" fill="currentColor" opacity="0.5"/><path d="M22 18H26V23H22V18Z" fill="currentColor" opacity="0.5"/><path d="M22 25H26V27H22V25Z" fill="currentColor" opacity="0.5"/></svg><div>No results found for "' + searchText + '"</div></div>';
-                return;
-            }
-            
-            // Group results
-            const workspaceResults = results.filter(r => !r.isDependency && !r.isStdlib);
-            const dependencyResults = results.filter(r => r.isDependency);
-            const stdlibResults = results.filter(r => r.isStdlib);
-            
-            let html = '';
-            
-            // Workspace results
-            if (workspaceResults.length > 0) {
-                html += '<div class="result-group"><div class="result-group-header"><span>🏠 Workspace</span><span style="opacity: 0.7; font-size: 12px;">(' + workspaceResults.length + ')</span></div>';
-                workspaceResults.forEach(r => {
-                    html += createResultItem(r, searchText);
-                });
-                html += '</div>';
-            }
-            
-            // Dependency results
-            if (dependencyResults.length > 0) {
-                html += '<div class="result-group"><div class="result-group-header"><span>📦 Dependencies</span><span style="opacity: 0.7; font-size: 12px;">(' + dependencyResults.length + ')</span></div>';
-                dependencyResults.forEach(r => {
-                    html += createResultItem(r, searchText);
-                });
-                html += '</div>';
-            }
-            
-            // Standard library results
-            if (stdlibResults.length > 0) {
-                html += '<div class="result-group"><div class="result-group-header"><span>⚡ Go Standard Library</span><span style="opacity: 0.7; font-size: 12px;">(' + stdlibResults.length + ')</span></div>';
-                stdlibResults.forEach(r => {
-                    html += createResultItem(r, searchText);
-                });
-                html += '</div>';
-            }
-            
-            resultsContainer.innerHTML = html;
-        }
-        
-        function createResultItem(result, searchText) {
-            const fileName = result.uri.split('/').pop();
-            const highlightedContent = highlightText(result.content, searchText);
-            
-            const tags = [];
-            if (result.isTest) tags.push('<span class="tag test">Test</span>');
-            if (result.isDependency) tags.push('<span class="tag dependency">Dependency</span>');
-            if (result.isStdlib) tags.push('<span class="tag stdlib">Stdlib</span>');
-            
-            return '<div class="result-item" onclick="openFile(\\'' + result.uri.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'") + '\\', ' + result.line + ')"><div class="result-content">' + highlightedContent + '</div><div class="result-location"><span class="result-file">' + fileName + ':' + (result.line + 1) + '</span>' + tags.join(' ') + '<span class="result-path" title="' + result.uri + '">' + result.uri + '</span></div></div>';
-        }
-        
-        function highlightText(text, searchText) {
-            if (!searchText) return escapeHtml(text);
-            
-            const safeText = escapeHtml(text);
-            const safeSearch = escapeHtml(searchText);
-            
-            // Simple case-insensitive replace without regex
-            let result = safeText;
-            const lowerText = safeText.toLowerCase();
-            const lowerSearch = safeSearch.toLowerCase();
-            
-            let index = 0;
-            let highlightedText = '';
-            
-            while (index < lowerText.length) {
-                const foundIndex = lowerText.indexOf(lowerSearch, index);
-                if (foundIndex === -1) {
-                    highlightedText += safeText.substring(index);
-                    break;
-                }
-                
-                highlightedText += safeText.substring(index, foundIndex);
-                highlightedText += '<span class="highlight">' + safeText.substring(foundIndex, foundIndex + safeSearch.length) + '</span>';
-                index = foundIndex + safeSearch.length;
-            }
-            
-            return highlightedText;
-        }
-        
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
+        fuzzyCheckbox.addEventListener('change', updateSearchMode);
         
         function openFile(uri, line) {
             vscode.postMessage({
@@ -153,221 +298,147 @@ export function getWebviewContent(): string {
             });
         }
         
-        // Focus on search input
-        searchInput.focus();
-    `;
-    
-    return `<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Golang Search</title>
-        <style>
-            body {
-                font-family: var(--vscode-font-family);
-                font-size: var(--vscode-font-size);
-                color: var(--vscode-foreground);
-                background-color: var(--vscode-editor-background);
-                margin: 0;
-                padding: 0;
-                overflow: hidden;
+        function highlightText(text, searchText) {
+            if (!searchText) return escapeHtml(text);
+            const safeText = escapeHtml(text);
+            const safeSearchText = escapeHtml(searchText);
+            const lowerText = safeText.toLowerCase();
+            const lowerSearch = safeSearchText.toLowerCase();
+            
+            let result = '';
+            let lastIndex = 0;
+            let index = lowerText.indexOf(lowerSearch);
+            
+            while (index !== -1) {
+                result += safeText.substring(lastIndex, index);
+                result += '<span class="highlight">';
+                result += safeText.substring(index, index + safeSearchText.length);
+                result += '</span>';
+                lastIndex = index + safeSearchText.length;
+                index = lowerText.indexOf(lowerSearch, lastIndex);
             }
             
-            .container {
-                display: flex;
-                flex-direction: column;
-                height: 100vh;
-                padding: 10px;
-                box-sizing: border-box;
-            }
-            
-            .search-container {
-                padding: 10px 0;
-            }
-            
-            #searchInput {
-                width: 100%;
-                padding: 8px 12px;
-                background-color: var(--vscode-input-background);
-                color: var(--vscode-input-foreground);
-                border: 1px solid var(--vscode-input-border);
-                border-radius: 4px;
-                outline: none;
-                font-size: 14px;
-                box-sizing: border-box;
-            }
-            
-            #searchInput:focus {
-                border-color: var(--vscode-focusBorder);
-            }
-            
-            .results-container {
-                flex: 1;
-                overflow-y: auto;
-                padding: 10px 0;
-            }
-            
-            .result-group {
-                margin-bottom: 20px;
-            }
-            
-            .result-group-header {
-                font-weight: bold;
-                margin-bottom: 8px;
-                padding: 4px 8px;
-                background-color: var(--vscode-editor-lineHighlightBackground);
-                border-radius: 4px;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            }
-            
-            .result-item {
-                padding: 6px 12px;
-                cursor: pointer;
-                border-radius: 4px;
-                margin-bottom: 4px;
-                display: flex;
-                flex-direction: column;
-                gap: 4px;
-                transition: background-color 0.1s;
-            }
-            
-            .result-item:hover {
-                background-color: var(--vscode-list-hoverBackground);
-            }
-            
-            .result-content {
-                font-family: 'Courier New', monospace;
-                font-size: 13px;
-                white-space: pre-wrap;
-                word-break: break-all;
-                color: var(--vscode-editor-foreground);
-            }
-            
-            .result-location {
-                font-size: 12px;
-                color: var(--vscode-descriptionForeground);
-                display: flex;
-                gap: 8px;
-                align-items: center;
-            }
-            
-            .result-file {
-                font-weight: 500;
-            }
-            
-            .result-path {
-                opacity: 0.8;
-                font-size: 11px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            }
-            
-            .empty-state {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                height: 100%;
-                color: var(--vscode-descriptionForeground);
-                text-align: center;
-                gap: 10px;
-            }
-            
-            .loading {
-                display: none;
-                text-align: center;
-                padding: 20px;
-                color: var(--vscode-descriptionForeground);
-            }
-            
-            .loading.active {
-                display: block;
-            }
-            
-            .error {
-                color: var(--vscode-errorForeground);
-                padding: 10px;
-                text-align: center;
-            }
-            
-            .highlight {
-                background-color: var(--vscode-editor-findMatchHighlightBackground);
-                color: var(--vscode-editor-findMatchHighlightForeground);
-                border-radius: 2px;
-                padding: 1px 2px;
-            }
-            
-            .tag {
-                font-size: 11px;
-                padding: 2px 6px;
-                border-radius: 3px;
-                background-color: var(--vscode-badge-background);
-                color: var(--vscode-badge-foreground);
-            }
-            
-            .tag.test {
-                background-color: var(--vscode-testing-iconQueued);
-                color: var(--vscode-editor-background);
-            }
-            
-            .tag.dependency {
-                background-color: var(--vscode-gitDecoration-modifiedResourceForeground);
-                color: var(--vscode-editor-background);
-            }
-            
-            .tag.stdlib {
-                background-color: var(--vscode-gitDecoration-addedResourceForeground);
-                color: var(--vscode-editor-background);
-            }
-            
-            .icon {
-                width: 16px;
-                height: 16px;
-                display: inline-block;
-                vertical-align: middle;
-            }
-            
-            ::-webkit-scrollbar {
-                width: 10px;
-            }
-            
-            ::-webkit-scrollbar-track {
-                background: transparent;
-            }
-            
-            ::-webkit-scrollbar-thumb {
-                background: var(--vscode-scrollbarSlider-background);
-                border-radius: 5px;
-            }
-            
-            ::-webkit-scrollbar-thumb:hover {
-                background: var(--vscode-scrollbarSlider-hoverBackground);
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="search-container">
-                <input type="text" id="searchInput" placeholder="Search in Go files and dependencies (min 2 characters)..." />
-            </div>
-            <div class="loading" id="loading">Searching...</div>
-            <div class="error" id="error" style="display: none;"></div>
-            <div class="results-container" id="results">
-                <div class="empty-state">
-                    <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M21 8C13.268 8 7 14.268 7 22C7 29.732 13.268 36 21 36C24.752 36 28.116 34.46 30.504 31.896L38.304 39.696C38.5 39.892 38.756 40 39.024 40C39.292 40 39.548 39.892 39.744 39.696C40.136 39.304 40.136 38.668 39.744 38.276L31.944 30.476C34.476 28.084 36 24.748 36 21C36 13.268 29.732 7 22 7L21 8ZM21 10C28.168 10 34 15.832 34 23C34 30.168 28.168 36 21 36C13.832 36 8 30.168 8 23C8 15.832 13.832 10 21 10Z" fill="currentColor" opacity="0.5"/>
-                    </svg>
-                    <div>Enter a search term to begin</div>
-                    <div style="font-size: 12px; opacity: 0.7;">Search in workspace and Go dependencies</div>
-                </div>
-            </div>
-        </div>
+            result += safeText.substring(lastIndex);
+            return result;
+        }
         
-        <script>${scriptContent}</script>
-    </body>
-    </html>`;
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function createResultItem(result, searchText) {
+            const highlightedContent = highlightText(result.content, searchText);
+            const tags = [];
+            
+            if (result.isTest) tags.push('<span class="tag test">Test</span>');
+            if (result.isDependency) tags.push('<span class="tag dependency">Dependency</span>');
+            if (result.isStdlib) tags.push('<span class="tag stdlib">Stdlib</span>');
+            
+            let cssClass = 'result-item';
+            if (result.isDependency) cssClass += ' dependency';
+            if (result.isTest) cssClass += ' test';
+            if (result.isStdlib) cssClass += ' stdlib';
+            
+            return '<div class="' + cssClass + '" onclick="openFile(\\'' + result.uri.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'") + '\\', ' + result.line + ')">' +
+                '<div class="result-content">' + highlightedContent + '</div>' +
+                '<div class="result-location">' +
+                    '<span class="result-file">' + result.uri.split('/').pop() + ':' + (result.line + 1) + '</span>' +
+                    tags.join(' ') +
+                    '<span class="result-path" title="' + result.uri + '">' + result.uri + '</span>' +
+                '</div>' +
+            '</div>';
+        }
+        
+        function displayError(error) {
+            resultsDiv.innerHTML = '<div class="error">Search error: ' + escapeHtml(error) + '</div>';
+        }
+        
+        // Handle messages from the extension
+        window.addEventListener('message', event => {
+            const message = event.data;
+            switch (message.type) {
+                case 'searchStart':
+                    resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
+                    break;
+                case 'searchResults':
+                    displayResults(message.results, message.searchText, message.fuzzy, message.indexStatus);
+                    break;
+                case 'searchInfo':
+                    displayInfo(message.message, message.status);
+                    break;
+                case 'searchError':
+                    displayError(message.error);
+                    break;
+            }
+        });
+        
+        function displayInfo(message, status) {
+            let className = 'info';
+            let icon = '$(info)';
+            
+            if (status === 'building') {
+                className = 'info building';
+                icon = '$(loading~spin)';
+            } else if (status === 'no-index') {
+                className = 'info warning';
+                icon = '$(warning)';
+            }
+            
+            resultsDiv.innerHTML = '<div class="' + className + '">' + icon + ' ' + escapeHtml(message) + '</div>';
+        }
+        
+        function displayResults(results, searchText, fuzzy, indexStatus) {
+            if (results.length === 0) {
+                let statusText = indexStatus ? ' (' + indexStatus + ')' : '';
+                resultsDiv.innerHTML = '<div class="no-results">No results found for "' + escapeHtml(searchText) + '" (' + (fuzzy ? 'fuzzy' : 'exact') + ' search)' + statusText + '</div>';
+                return;
+            }
+            
+            // Group results by type
+            const workspaceResults = results.filter(r => !r.isDependency && !r.isStdlib);
+            const dependencyResults = results.filter(r => r.isDependency);
+            const stdlibResults = results.filter(r => r.isStdlib);
+            
+            let html = '';
+            
+            // Add index status if available
+            if (indexStatus) {
+                html += '<div class="index-status">' + escapeHtml(indexStatus) + '</div>';
+            }
+            
+            // Workspace results
+            if (workspaceResults.length > 0) {
+                html += '<div class="result-group">';
+                html += '<div class="result-group-header"><span>🏠 Workspace</span><span>(' + workspaceResults.length + ')</span></div>';
+                workspaceResults.forEach(result => {
+                    html += createResultItem(result, searchText);
+                });
+                html += '</div>';
+            }
+            
+            // Dependency results
+            if (dependencyResults.length > 0) {
+                html += '<div class="result-group">';
+                html += '<div class="result-group-header"><span>📦 Dependencies</span><span>(' + dependencyResults.length + ')</span></div>';
+                dependencyResults.forEach(result => {
+                    html += createResultItem(result, searchText);
+                });
+                html += '</div>';
+            }
+            
+            // Stdlib results
+            if (stdlibResults.length > 0) {
+                html += '<div class="result-group">';
+                html += '<div class="result-group-header"><span>⚡ Standard Library</span><span>(' + stdlibResults.length + ')</span></div>';
+                stdlibResults.forEach(result => {
+                    html += createResultItem(result, searchText);
+                });
+                html += '</div>';
+            }
+            
+            resultsDiv.innerHTML = html;
+        }
+    `;
 } 
