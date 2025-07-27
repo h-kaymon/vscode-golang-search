@@ -1,8 +1,8 @@
 {
   "name": "golang-search",
   "displayName": "Golang Search",
-  "description": "Search Go files and dependencies, including workspace and module cache",
-  "version": "0.0.1",
+  "description": "Fast parallel search for Go files and dependencies with ripgrep acceleration",
+  "version": "0.2.2",
   "publisher": "kaymon",
   "author": {
     "name": "kaymon"
@@ -18,7 +18,11 @@
     "go",
     "search",
     "dependencies",
-    "modules"
+    "modules",
+    "ripgrep",
+    "parallel",
+    "fast-search",
+    "code-search"
   ],
   "engines": {
     "vscode": "^1.74.0"
@@ -27,7 +31,7 @@
     "Other"
   ],
   "activationEvents": [
-    "*"
+    "onCommand:golang-search.searchInDeps"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -48,6 +52,31 @@
         "icon": "$(clear-all)"
       }
     ],
+    "configuration": {
+      "title": "Golang Search",
+      "properties": {
+        "golang-search.searchEngine": {
+          "type": "string",
+          "enum": ["ripgrep", "grep"],
+          "default": "ripgrep",
+          "description": "Search engine to use (ripgrep for speed, grep for compatibility)"
+        },
+        "golang-search.maxConcurrentSearches": {
+          "type": "number",
+          "default": 6,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Maximum number of concurrent search processes (higher = faster but more CPU intensive)"
+        },
+        "golang-search.searchTimeout": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "maximum": 120,
+          "description": "Search timeout in seconds"
+        }
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -74,16 +103,6 @@
     ],
     "menus": {
       "view/title": [
-        {
-          "command": "golang-search.searchInDeps",
-          "when": "view == golang-search-results",
-          "group": "navigation"
-        },
-        {
-          "command": "golang-search.refreshView",
-          "when": "view == golang-search-results",
-          "group": "navigation"
-        },
         {
           "command": "golang-search.clearResults",
           "when": "view == golang-search-results",

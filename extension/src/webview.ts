@@ -69,6 +69,9 @@ export function getWebviewContent(searchText?: string) {
         .dependency-item {
             border-left: 3px solid gold;
         }
+        .stdlib-item {
+            border-left: 3px solid #00A8FF; /* Blue for Go standard library */
+        }
         .test-file-item {
             border-left: 3px solid #8ba0a8; /* Grayish blue indicator for test files */
             opacity: 0.9;
@@ -205,6 +208,7 @@ export function getWebviewContent(searchText?: string) {
                     
                     // Group results
                     const workspaceResults = message.results.filter(r => r.source === 'workspace');
+                    const stdlibResults = message.results.filter(r => r.source === 'stdlib');
                     const dependencyResults = message.results.filter(r => r.source === 'dependency');
                     
                     // Clear results container
@@ -260,6 +264,60 @@ export function getWebviewContent(searchText?: string) {
                         resultsContainer.appendChild(workspaceGroup);
                     }
                     
+                    // Add Go standard library results
+                    if (stdlibResults.length > 0) {
+                        const stdlibGroup = document.createElement('div');
+                        stdlibGroup.className = 'result-group';
+                        
+                        const stdlibHeader = document.createElement('div');
+                        stdlibHeader.className = 'result-group-header';
+                        
+                        // Analyze regular and test file counts
+                        const nonTestStdlibResults = stdlibResults.filter(r => 
+                            !r.filePath.endsWith('_test.go')
+                        );
+                        const testStdlibResults = stdlibResults.filter(r => 
+                            r.filePath.endsWith('_test.go')
+                        );
+                        
+                        stdlibHeader.textContent = 'Go Source Code (' + stdlibResults.length + 
+                            ', Regular: ' + nonTestStdlibResults.length + 
+                            ', Tests: ' + testStdlibResults.length + ')';
+                        stdlibGroup.appendChild(stdlibHeader);
+                        
+                        stdlibResults.forEach(result => {
+                            const resultItem = document.createElement('div');
+                            const isTestFile = result.filePath.endsWith('_test.go');
+                            let className = 'result-item stdlib-item';
+                            if (isTestFile) {
+                                className += ' test-file-item';
+                            }
+                            resultItem.className = className;
+                            resultItem.addEventListener('click', () => {
+                                handleFileOpen(result.filePath, result.lineNumber);
+                            });
+                            
+                            const contentElem = document.createElement('div');
+                            contentElem.className = 'result-content';
+                            // Use innerHTML to display highlighted text
+                            const safeContent = result.content
+                                .replace(/&/g, '&amp;')
+                                .replace(/</g, '&lt;')
+                                .replace(/>/g, '&gt;');
+                            contentElem.innerHTML = highlightText(safeContent, message.searchText);
+                            
+                            const pathElem = document.createElement('div');
+                            pathElem.className = 'result-path';
+                            pathElem.innerHTML = '<span>' + result.fileName + ':' + result.lineNumber + '</span><span>' + result.simplifiedPath + '</span>';
+                            
+                            resultItem.appendChild(contentElem);
+                            resultItem.appendChild(pathElem);
+                            stdlibGroup.appendChild(resultItem);
+                        });
+                        
+                        resultsContainer.appendChild(stdlibGroup);
+                    }
+                    
                     // Add dependency results
                     if (dependencyResults.length > 0) {
                         const depGroup = document.createElement('div');
@@ -276,7 +334,7 @@ export function getWebviewContent(searchText?: string) {
                             r.filePath.endsWith('_test.go')
                         );
                         
-                        depHeader.textContent = 'Dependencies (' + dependencyResults.length + 
+                        depHeader.textContent = 'Third-party Dependencies (' + dependencyResults.length + 
                             ', Regular: ' + nonTestDepResults.length + 
                             ', Tests: ' + testDepResults.length + ')';
                         depGroup.appendChild(depHeader);
@@ -318,6 +376,14 @@ export function getWebviewContent(searchText?: string) {
                 case 'searchError':
                     searchStatus.textContent = message.message;
                     searchStatus.className = 'error';
+                    resultsContainer.innerHTML = '';
+                    break;
+                    
+                case 'clearInput':
+                    // Clear input field and reset status
+                    searchInput.value = '';
+                    searchStatus.textContent = 'Enter keywords to search Go code...';
+                    searchStatus.className = 'tips';
                     resultsContainer.innerHTML = '';
                     break;
             }

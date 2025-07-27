@@ -17,6 +17,83 @@ declare var console: {
 // Convert exec to Promise form
 const execPromise = util.promisify(cp.exec);
 
+// Check if ripgrep is available on the system
+async function isRipgrepAvailable(): Promise<boolean> {
+    try {
+        await execPromise('rg --version');
+        return true;
+    } catch (error) {
+        console.log('ripgrep not found, will use grep as fallback');
+        return false;
+    }
+}
+
+// Global variable to cache ripgrep availability
+let ripgrepAvailable: boolean | null = null;
+
+// Get ripgrep availability (cached)
+async function getRipgrepAvailability(): Promise<boolean> {
+    if (ripgrepAvailable === null) {
+        ripgrepAvailable = await isRipgrepAvailable();
+    }
+    return ripgrepAvailable;
+}
+
+// Parallel search utility - limit concurrent executions
+class ParallelSearchManager {
+    private running = 0;
+    private queue: Array<() => Promise<any>> = [];
+    private maxConcurrent: number;
+
+    constructor(maxConcurrent: number = 6) {
+        this.maxConcurrent = Math.max(1, Math.min(20, maxConcurrent)); // Ensure reasonable bounds
+        console.log(`Initialized ParallelSearchManager with ${this.maxConcurrent} max concurrent searches`);
+    }
+
+    async execute<T>(task: () => Promise<T>): Promise<T> {
+        return new Promise((resolve, reject) => {
+            const wrappedTask = async () => {
+                try {
+                    this.running++;
+                    const result = await task();
+                    resolve(result);
+                } catch (error) {
+                    reject(error);
+                } finally {
+                    this.running--;
+                    this.processQueue();
+                }
+            };
+
+            if (this.running < this.maxConcurrent) {
+                wrappedTask();
+            } else {
+                this.queue.push(wrappedTask);
+            }
+        });
+    }
+
+    private processQueue() {
+        if (this.queue.length > 0 && this.running < this.maxConcurrent) {
+            const task = this.queue.shift();
+            if (task) {
+                task();
+            }
+        }
+    }
+    
+    getStatus(): {running: number, queued: number, maxConcurrent: number} {
+        return {
+            running: this.running,
+            queued: this.queue.length,
+            maxConcurrent: this.maxConcurrent
+        };
+    }
+}
+
+// Global parallel search manager
+let searchManager: ParallelSearchManager;
+
 // Get Go module cache path
 async function getGoModCachePath(): Promise<string> {
     try {
@@ -27,6 +104,43 @@ async function getGoModCachePath(): Promise<string> {
         // Return default path on failure
         return path.join(os.homedir(), 'go', 'pkg', 'mod');
     }
+}
+
+// Get Go standard library source path
+async function getGoRootSrcPath(): Promise<string> {
+    try {
+        const { stdout } = await execPromise('go env GOROOT');
+        const goRoot = stdout.trim();
+        return path.join(goRoot, 'src');
+    } catch (error) {
+        console.error('get GOROOT failed:', error);
+        // Return empty string if failed
+        return '';
+    }
+}
+
+// Get Go source path (only GOROOT/src)
+async function getGoSourcePaths(): Promise<Array<{path: string, name: string}>> {
+    const sourcePaths: Array<{path: string, name: string}> = [];
+    
+    try {
+        const { stdout } = await execPromise('go env GOROOT');
+        const goRoot = stdout.trim();
+        
+        // Only include GOROOT/src - contains all standard library and tools
+        const srcPath = path.join(goRoot, 'src');
+        if (fs.existsSync(srcPath)) {
+            sourcePaths.push({
+                path: srcPath,
+                name: 'Go Source Code'
+            });
+        }
+        
+    } catch (error) {
+        console.error('get Go source paths failed:', error);
+    }
+    
+    return sourcePaths;
 }
 
 // Get project dependencies
@@ -52,7 +166,8 @@ async function getProjectDependencies(workspaceDir: string): Promise<string[]> {
 // Define search result source type
 enum ResultSource {
     Dependency = 'dependency',
-    Workspace = 'workspace'
+    Workspace = 'workspace',
+    Stdlib = 'stdlib'
 }
 
 // Define search result type
@@ -149,31 +264,38 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
                 return;
             }
             
-                            // Search both workspace and dependencies
-                const [workspaceResults, dependencyResults] = await Promise.all([
-                    searchInWorkspace(workspaceDir, searchText),
-                    searchInDependencies(workspaceDir, searchText)
-                ]);
-                
-                // Sort each result set separately, prioritizing non-test files
-                const sortWorkspaceResults = (a: SearchResult, b: SearchResult) => {
-                    const aIsTest = a.location.uri.fsPath.endsWith('_test.go');
-                    const bIsTest = b.location.uri.fsPath.endsWith('_test.go');
-                    if (aIsTest && !bIsTest) return 1;
-                    if (!aIsTest && bIsTest) return -1;
-                    return 0;
-                };
-                
-                // Ensure results are sorted with non-test files first within each group
-                const sortedWorkspaceResults = [...workspaceResults].sort(sortWorkspaceResults);
-                const sortedDependencyResults = [...dependencyResults].sort(sortWorkspaceResults);
-                
-                // Combine results - workspace first, with non-test files prioritized in each group
-                const results = [...sortedWorkspaceResults, ...sortedDependencyResults];
-                
-                // Save search results for tree view
-                lastSearchResults = results;
-                lastSearchText = searchText;
+            // Initialize search manager if not exists
+            const config = vscode.workspace.getConfiguration('golang-search');
+            const maxConcurrent = config.get<number>('maxConcurrentSearches', 6);
+            if (!searchManager) {
+                searchManager = new ParallelSearchManager(maxConcurrent);
+            }
+            
+            // Use parallel ripgrep/grep search
+            const [workspaceResults, dependencyResults] = await Promise.all([
+                searchInWorkspace(workspaceDir, searchText),
+                searchInDependencies(workspaceDir, searchText)
+            ]);
+            
+            // Sort each result set separately, prioritizing non-test files
+            const sortWorkspaceResults = (a: SearchResult, b: SearchResult) => {
+                const aIsTest = a.location.uri.fsPath.endsWith('_test.go');
+                const bIsTest = b.location.uri.fsPath.endsWith('_test.go');
+                if (aIsTest && !bIsTest) return 1;
+                if (!aIsTest && bIsTest) return -1;
+                return 0;
+            };
+            
+            // Ensure results are sorted with non-test files first within each group
+            const sortedWorkspaceResults = [...workspaceResults].sort(sortWorkspaceResults);
+            const sortedDependencyResults = [...dependencyResults].sort(sortWorkspaceResults);
+            
+            // Combine results - workspace first, with non-test files prioritized in each group
+            const results = [...sortedWorkspaceResults, ...sortedDependencyResults];
+            
+            // Save search results for tree view
+            lastSearchResults = results;
+            lastSearchText = searchText;
             
             // Refresh tree view
             this._searchResultsProvider.refresh();
@@ -181,17 +303,33 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
             
             // Format results and send to webview
             const goModCachePath = await getGoModCachePath();
+            const goSourcePaths = await getGoSourcePaths();
             const formattedResults = results.map(result => {
                 const location = result.location;
                 const filePath = location.uri.fsPath;
                 const fileName = path.basename(filePath);
                 const lineNumber = location.range.start.line + 1;
                 
-                // Simplify file path by removing Go module cache prefix
+                // Determine result type and simplify file path
                 let simplifiedPath = filePath;
-                const prefixToRemove = goModCachePath + '/';
-                if (result.source === ResultSource.Dependency && simplifiedPath.startsWith(prefixToRemove)) {
-                    simplifiedPath = simplifiedPath.substring(prefixToRemove.length);
+                let resultType = result.source;
+                
+                if (result.source === ResultSource.Stdlib) {
+                    // Check which Go source component this belongs to
+                    for (const sourcePath of goSourcePaths) {
+                        if (filePath.startsWith(sourcePath.path)) {
+                            simplifiedPath = filePath.substring(sourcePath.path.length + 1);
+                            break;
+                        }
+                    }
+                    resultType = ResultSource.Stdlib;
+                } else if (result.source === ResultSource.Dependency) {
+                    // Third-party dependency
+                    const prefixToRemove = goModCachePath + '/';
+                    if (simplifiedPath.startsWith(prefixToRemove)) {
+                        simplifiedPath = simplifiedPath.substring(prefixToRemove.length);
+                    }
+                    resultType = ResultSource.Dependency;
                 }
                 
                 return {
@@ -200,7 +338,7 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
                     lineNumber: lineNumber,
                     filePath: filePath,
                     simplifiedPath: simplifiedPath,
-                    source: result.source
+                    source: resultType
                 };
             });
             
@@ -216,6 +354,15 @@ class GoSearchWebviewProvider implements vscode.WebviewViewProvider {
             this._view.webview.postMessage({ 
                 command: 'searchError', 
                 message: `搜索错误: ${error}` 
+            });
+        }
+    }
+    
+    // Clear input in webview
+    public clearInput() {
+        if (this._view) {
+            this._view.webview.postMessage({ 
+                command: 'clearInput'
             });
         }
     }
@@ -373,8 +520,8 @@ async function searchInWorkspace(workspaceDir: string, searchText: string): Prom
         
         // Check if directory has .go files
         try {
-            // Use find command to check if Go files exist
-            const checkCommand = `find "${workspaceDir}" -name "*.go" -type f -print -quit`;
+            // Use ripgrep to check if Go files exist - much faster than find
+            const checkCommand = `rg --files --type go "${workspaceDir}" | head -1`;
             const { stdout: checkResult } = await execPromise(checkCommand);
             
             if (!checkResult.trim()) {
@@ -382,11 +529,81 @@ async function searchInWorkspace(workspaceDir: string, searchText: string): Prom
                 return results;
             }
         } catch (checkError) {
-            console.log('check Go files failed:', checkError);
+            console.log('check Go files failed, trying with find as fallback:', checkError);
+            // Fallback to find command if ripgrep is not available
+            try {
+                const checkCommand = `find "${workspaceDir}" -name "*.go" -type f -print -quit`;
+                const { stdout: checkResult } = await execPromise(checkCommand);
+                
+                if (!checkResult.trim()) {
+                    console.log('workspace has no Go files:', workspaceDir);
+                    return results;
+                }
+            } catch (findError) {
+                console.log('find fallback also failed:', findError);
             // Continue trying to search, even if check failed
+            }
         }
         
-        // Run grep command in workspace directory
+        // Run ripgrep command in workspace directory
+        try {
+            // Use ripgrep for much faster searching
+            // --type go: only search Go files
+            // --line-number: include line numbers
+            // --with-filename: include filename in output
+            // --no-heading: don't group by file
+            // --max-count 50: limit results per file to prevent overwhelming output
+            const rgCommand = `rg --type go --line-number --with-filename --no-heading --max-count 25 "${searchText}" "${workspaceDir}"`;
+            
+            const { stdout } = await execPromise(rgCommand);
+            if (!stdout.trim()) {
+                // No search results
+                return results;
+            }
+            
+            const lines = stdout.split('\n').filter(Boolean);
+            const nonTestResults: SearchResult[] = [];
+            const testResults: SearchResult[] = [];
+            
+            for (const line of lines) {
+                // Try to match format with line numbers: file path:line number:content
+                const match = line.match(/^(.+):(\d+):(.*)/);
+                if (match) {
+                    const [, filePath, lineStr, content] = match;
+                    const lineNumber = parseInt(lineStr, 10) - 1; // VSCode line numbers start at 0
+                    const uri = vscode.Uri.file(filePath);
+                    const position = new vscode.Position(lineNumber, 0);
+                    const range = new vscode.Range(position, position);
+                    
+                    // Create an object containing position, content, and source
+                    const locationWithContent = {
+                        location: new vscode.Location(uri, range),
+                        content: content.trim(),
+                        source: ResultSource.Workspace // Mark as workspace source
+                    };
+                    
+                    // Check if file is a test file (ends with _test.go)
+                    if (filePath.endsWith('_test.go')) {
+                        testResults.push(locationWithContent);
+                    } else {
+                        nonTestResults.push(locationWithContent);
+                    }
+                    
+                    // If total results exceed 50, stop adding
+                    if (nonTestResults.length + testResults.length >= 50) {
+                        break;
+                    }
+                }
+            }
+            
+            // Add non-test file results first, then test file results
+            results.push(...nonTestResults, ...testResults);
+            // Limit results to 50
+            return results.slice(0, 50);
+            
+        } catch (rgError) {
+            console.log('ripgrep search failed, trying grep fallback:', rgError);
+            // Fallback to grep if ripgrep is not available
         try {
             const grepCommand = `grep -rn "${searchText}" --include="*.go" "${workspaceDir}"`;
             
@@ -441,6 +658,7 @@ async function searchInWorkspace(workspaceDir: string, searchText: string): Prom
             console.log('grep search results are empty or error:', grepError);
             // Return empty results on error
             return results;
+            }
         }
     } catch (error) {
         console.log('workspace search failed:', error);
@@ -449,94 +667,201 @@ async function searchInWorkspace(workspaceDir: string, searchText: string): Prom
     return results;
 }
 
-// Search content in dependencies
+// Search content in dependencies with parallel processing
 async function searchInDependencies(workspaceDir: string, searchText: string): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
-    const nonTestResults: SearchResult[] = [];
-    const testResults: SearchResult[] = [];
     
     try {
         const goModCachePath = await getGoModCachePath();
-        if (!goModCachePath || !fs.existsSync(goModCachePath)) {
-            console.log('Go module cache path not found:', goModCachePath);
-            return results;
+        
+        // Collect all search targets
+        const searchTargets: Array<{path: string, type: 'stdlib' | 'dependency', name: string}> = [];
+        
+        // Add complete Go source paths (stdlib + tools + internal + runtime)
+        const goSourcePaths = await getGoSourcePaths();
+        for (const sourcePath of goSourcePaths) {
+            searchTargets.push({
+                path: sourcePath.path,
+                type: 'stdlib',
+                name: sourcePath.name
+            });
         }
         
-        const dependencies = await getProjectDependencies(workspaceDir);
-        if (dependencies.length === 0) {
-            console.log('project has no dependencies');
-            return results;
-        }
-        
-        // Iterate through all dependencies
-        for (const dep of dependencies) {
-            const [moduleName, version] = dep.split(' ');
-            if (!version) continue;
+        // Add module dependencies
+        if (goModCachePath && fs.existsSync(goModCachePath)) {
+            const dependencies = await getProjectDependencies(workspaceDir);
             
-            // Build module path in cache
-            const modulePath = path.join(goModCachePath, `${moduleName}@${version}`);
-            if (fs.existsSync(modulePath)) {
-                // Use go tools to search for keywords in dependencies
-                try {
-                    // Run grep command in module directory - use quotes to handle spaces and special characters
-                    const grepCommand = `grep -rn "${searchText}" --include="*.go" "${modulePath}"`;
-                    
-                    const { stdout } = await execPromise(grepCommand);
-                    if (!stdout.trim()) {
-                        // No search results
-                        continue;
-                    }
-                    
-                    const topLines = stdout.split('\n').filter(Boolean);
-                    for (const line of topLines) {
-                        
-                        // Try to match format with line numbers: file path:line number:content
-                        const match = line.match(/^(.+):(\d+):(.*)/);
-                        if (match) {
-                            const [, filePath, lineStr, content] = match;
-                            const lineNumber = parseInt(lineStr, 10) - 1; // VSCode line numbers start at 0
-                            const uri = vscode.Uri.file(filePath);
-                            const position = new vscode.Position(lineNumber, 0);
-                            const range = new vscode.Range(position, position);
-                            
-                            // Create an object containing position, content, and source
-                            const locationWithContent = {
-                                location: new vscode.Location(uri, range),
-                                content: content.trim(),
-                                source: ResultSource.Dependency // Mark as dependency source
-                            };
-                            
-                            // Check if file is a test file (ends with _test.go)
-                            if (filePath.endsWith('_test.go')) {
-                                testResults.push(locationWithContent);
-                            } else {
-                                nonTestResults.push(locationWithContent);
-                            }
-                            
-                            // If total results reach 50, stop adding
-                            if (nonTestResults.length + testResults.length >= 50) {
-                                // Prioritize non-test files
-                                results.push(...nonTestResults, ...testResults);
-                                return results.slice(0, 50); 
-                            }
-                        }
-                    }
-                } catch (error) {
-                    // It's normal for grep to return an error when there are no results
-                    // console.log(`No matches found in module ${moduleName}:`, error);
+            for (const dep of dependencies) {
+                const [moduleName, version] = dep.split(' ');
+                if (!version) continue;
+                
+                const modulePath = path.join(goModCachePath, `${moduleName}@${version}`);
+                if (fs.existsSync(modulePath)) {
+                    searchTargets.push({
+                        path: modulePath,
+                        type: 'dependency',
+                        name: moduleName
+                    });
                 }
-            } else {
-                // Module path doesn't exist, skip
-                // console.log(`Module path doesn't exist: ${modulePath}`);
             }
         }
         
-        // Prioritize non-test file results
-        results.push(...nonTestResults, ...testResults);
-        return results.slice(0, 50);
+        // Limit search targets to avoid overwhelming the system
+        const maxTargets = 50; // Reasonable limit for parallel searches
+        const limitedTargets = searchTargets.slice(0, maxTargets);
+        
+        const startTime = Date.now();
+        console.log(`Starting parallel search across ${limitedTargets.length} targets...`);
+        
+        // Execute parallel searches
+        const searchPromises = limitedTargets.map((target, index) => 
+            searchManager.execute(async () => {
+                const targetStartTime = Date.now();
+                const result = await searchSingleTarget(target, searchText);
+                const duration = Date.now() - targetStartTime;
+                console.log(`Target ${index + 1}/${limitedTargets.length}: ${target.name} (${result.length} results, ${duration}ms)`);
+                return result;
+            })
+        );
+        
+        // Wait for all searches to complete
+        const searchResults = await Promise.all(searchPromises);
+        const totalDuration = Date.now() - startTime;
+        
+        console.log(`Parallel search completed in ${totalDuration}ms. Manager status:`, searchManager.getStatus());
+        
+        // Flatten and combine results
+        const allResults: SearchResult[] = [];
+        for (const targetResults of searchResults) {
+            allResults.push(...targetResults);
+        }
+        
+        // Sort by source type: stdlib first, then dependencies
+        const sortedResults = allResults.sort((a, b) => {
+            if (a.source === ResultSource.Stdlib && b.source === ResultSource.Dependency) return -1;
+            if (a.source === ResultSource.Dependency && b.source === ResultSource.Stdlib) return 1;
+            
+            // Within same source type, prioritize non-test files
+            const aIsTest = a.location.uri.fsPath.endsWith('_test.go');
+            const bIsTest = b.location.uri.fsPath.endsWith('_test.go');
+            if (aIsTest && !bIsTest) return 1;
+            if (!aIsTest && bIsTest) return -1;
+            
+            return 0;
+        });
+        
+        // Limit total results
+        return sortedResults.slice(0, 100);
         
     } catch (error) {
-        console.error('search dependencies failed:', error);
+        console.error('Parallel dependency search failed:', error);
+    }
+    
+    return results;
+}
+
+// Search in a single target (stdlib or dependency module)
+async function searchSingleTarget(
+    target: {path: string, type: 'stdlib' | 'dependency', name: string}, 
+    searchText: string
+): Promise<SearchResult[]> {
+    const results: SearchResult[] = [];
+    
+    // Get configuration at function scope so it's available in catch block
+    const config = vscode.workspace.getConfiguration('golang-search');
+    const searchEngine = config.get<string>('searchEngine', 'ripgrep');
+    const timeoutMs = config.get<number>('searchTimeout', 30) * 1000; // Convert to milliseconds
+    
+    // Declare command variable at function scope so it's available in catch block
+    let command: string = '';
+    
+    try {
+        
+        // Check if target path exists before searching
+        if (!fs.existsSync(target.path)) {
+            console.log(`Target path does not exist: ${target.path}`);
+            return results;
+        }
+        
+        let maxResults: number;
+        
+        // Adjust max results based on target type
+        if (target.type === 'stdlib') {
+            maxResults = 25; // Increase stdlib results since we simplified the search
+        } else {
+            maxResults = 10; // Limit per dependency
+        }
+        
+        // Ensure proper path quoting for command line
+        const quotedPath = `"${target.path}"`;
+        const quotedSearchText = `"${searchText.replace(/"/g, '\\"')}"`;
+        
+        if (searchEngine === 'ripgrep') {
+            // Use ripgrep for faster search with fixed-strings to avoid regex issues
+            command = `rg --type go --line-number --with-filename --no-heading --fixed-strings --max-count ${maxResults} ${quotedSearchText} ${quotedPath}`;
+        } else {
+            // Fallback to grep with fixed strings
+            command = `grep -rn --fixed-strings ${quotedSearchText} --include="*.go" ${quotedPath} | head -${maxResults}`;
+        }
+        
+        // Create a promise that rejects after timeout
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('Search timeout')), timeoutMs);
+        });
+        
+        // Race between the command execution and timeout
+        const { stdout } = await Promise.race([
+            execPromise(command),
+            timeoutPromise
+        ]);
+        
+        if (!stdout.trim()) {
+            return results;
+        }
+        
+        const lines = stdout.split('\n').filter(Boolean);
+        
+        for (const line of lines) {
+            const match = line.match(/^(.+):(\d+):(.*)/);
+            if (match) {
+                const [, filePath, lineStr, content] = match;
+                const lineNumber = parseInt(lineStr, 10) - 1;
+                const uri = vscode.Uri.file(filePath);
+                const position = new vscode.Position(lineNumber, 0);
+                const range = new vscode.Range(position, position);
+                
+                const sourceType = target.type === 'stdlib' ? ResultSource.Stdlib : ResultSource.Dependency;
+                
+                const searchResult: SearchResult = {
+                    location: new vscode.Location(uri, range),
+                    content: content.trim(),
+                    source: sourceType
+                };
+                
+                results.push(searchResult);
+            }
+        }
+        
+        console.log(`Found ${results.length} results in ${target.name}`);
+        
+    } catch (error) {
+        // Improved error handling and logging
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        if (errorMessage.includes('timeout') || errorMessage.includes('Search timeout')) {
+            console.log(`Search timed out for ${target.name} (${config.get<number>('searchTimeout', 30)}s)`);
+        } else {
+            // Log detailed error information for debugging
+            console.log(`Search failed for ${target.name}:`);
+            console.log(`  Command: ${command}`);
+            console.log(`  Error: ${errorMessage}`);
+            console.log(`  Target path exists: ${fs.existsSync(target.path)}`);
+            
+            // Check if it's a command not found error
+            if (errorMessage.includes('command not found') || errorMessage.includes('not found')) {
+                console.log(`  Suggestion: Install ${searchEngine} or switch to grep in settings`);
+            }
+        }
     }
     
     return results;
@@ -594,6 +919,9 @@ export function activate(context: vscode.ExtensionContext) {
         lastSearchText = '';
         searchResultsProvider.refresh();
         vscode.commands.executeCommand('setContext', 'golang-search.hasResults', false);
+        
+        // Also clear webview input if webview exists
+        webviewProvider.clearInput();
     });
     
     // Add commands and views to context
