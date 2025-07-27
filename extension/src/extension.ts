@@ -534,7 +534,8 @@ Path: ${selected.detail}`);
                         
                         // Clean up all index files for current workspace
                         const indexer = new GoIndexer(context);
-                        const paths = indexer.getIndexFilePaths(context.globalStorageUri.fsPath);
+                        const storageDir = indexer.getStorageDirectory();
+                        const paths = indexer.getIndexFilePaths(storageDir);
                         let cleanedFiles = 0;
                         
                         // Clean up split format files
@@ -547,6 +548,31 @@ Path: ${selected.detail}`);
                                 } catch (error) {
                                     console.error(`Failed to clean ${name} file:`, error);
                                 }
+                            }
+                            
+                            // Also clean up associated multi-file parts
+                            const baseNameWithoutExt = path.basename(filePath, '.json');
+                            const dirPath = path.dirname(filePath);
+                            
+                            try {
+                                const files = fs.readdirSync(dirPath);
+                                const relatedFiles = files.filter(file => 
+                                    file.startsWith(baseNameWithoutExt) && 
+                                    (file.includes('-part') || file.includes('-meta'))
+                                );
+                                
+                                for (const relatedFile of relatedFiles) {
+                                    const relatedPath = path.join(dirPath, relatedFile);
+                                    try {
+                                        fs.unlinkSync(relatedPath);
+                                        cleanedFiles++;
+                                        console.log(`Cleaned up related file: ${relatedPath}`);
+                                    } catch (relatedError) {
+                                        console.error(`Failed to clean related file: ${relatedPath}`, relatedError);
+                                    }
+                                }
+                            } catch (dirError) {
+                                console.log(`Could not scan directory for related files: ${dirPath}`);
                             }
                         }
                         
@@ -678,8 +704,100 @@ async function loadIndexInBackground(
         }
     } catch (error) {
         console.error('Background index loading failed:', error);
-        statusBarItem.text = '$(warning) Go Index';
-        statusBarItem.tooltip = 'Go Search: Index loading failed. Click to rebuild.';
+        
+        // If it's a string length error, force complete cleanup and rebuild
+        if (error && typeof error === 'object' && 'message' in error && 
+            typeof (error as any).message === 'string' && 
+            (error as any).message.includes('Invalid string length')) {
+            
+            console.log('Detected "Invalid string length" error, performing emergency cleanup...');
+            statusBarItem.text = '$(loading~spin) Emergency Cleanup...';
+            statusBarItem.tooltip = 'Go Search: Cleaning up corrupted index files...';
+            
+            try {
+                // Force cleanup all index files
+                const storageDir = indexer.getStorageDirectory();
+                const paths = indexer.getIndexFilePaths(storageDir);
+                let cleanedFiles = 0;
+                
+                // Remove all index files (both split and legacy formats)
+                const allPaths = Object.values(paths);
+                for (const filePath of allPaths) {
+                    if (fs.existsSync(filePath)) {
+                        try {
+                            fs.unlinkSync(filePath);
+                            cleanedFiles++;
+                            console.log(`Emergency cleanup removed: ${filePath}`);
+                        } catch (deleteError) {
+                            console.error(`Failed to remove during emergency cleanup: ${filePath}`, deleteError);
+                        }
+                    }
+                    
+                    // Also clean up associated multi-file parts during emergency cleanup
+                    const baseNameWithoutExt = path.basename(filePath, '.json');
+                    const dirPath = path.dirname(filePath);
+                    
+                    try {
+                        const files = fs.readdirSync(dirPath);
+                        const relatedFiles = files.filter(file => 
+                            file.startsWith(baseNameWithoutExt) && 
+                            (file.includes('-part') || file.includes('-meta'))
+                        );
+                        
+                        for (const relatedFile of relatedFiles) {
+                            const relatedPath = path.join(dirPath, relatedFile);
+                            try {
+                                fs.unlinkSync(relatedPath);
+                                cleanedFiles++;
+                                console.log(`Emergency cleanup removed related file: ${relatedPath}`);
+                            } catch (relatedError) {
+                                console.error(`Failed to remove related file during emergency cleanup: ${relatedPath}`, relatedError);
+                            }
+                        }
+                    } catch (dirError) {
+                        console.log(`Could not scan directory during emergency cleanup: ${dirPath}`);
+                    }
+                }
+                
+                console.log(`Emergency cleanup completed: ${cleanedFiles} files removed`);
+                
+                // Try to rebuild index after cleanup
+                statusBarItem.text = '$(loading~spin) Building Fresh Index...';
+                statusBarItem.tooltip = 'Go Search: Building fresh index after cleanup...';
+                
+                await indexer.buildIndex();
+                
+                statusBarItem.text = '$(search) Go Index';
+                statusBarItem.tooltip = 'Go Search: Index rebuilt successfully';
+                
+                vscode.window.showInformationMessage(
+                    'Detected and fixed index corruption. Fresh index built successfully!', 
+                    'Open Search'
+                ).then(selection => {
+                    if (selection === 'Open Search') {
+                        golangSearchView.focus();
+                    }
+                });
+                
+            } catch (cleanupError) {
+                console.error('Emergency cleanup failed:', cleanupError);
+                statusBarItem.text = '$(error) Go Index';
+                statusBarItem.tooltip = 'Go Search: Emergency cleanup failed. Use "Clean Up Index Files" command.';
+                
+                vscode.window.showErrorMessage(
+                    'Go Search encountered index corruption. Please run "Go Search: Clean Up Index Files" command.',
+                    'Clean Up Now'
+                ).then(selection => {
+                    if (selection === 'Clean Up Now') {
+                        vscode.commands.executeCommand('golang-search.cleanupIndexes');
+                    }
+                });
+            }
+        } else {
+            // Handle other types of errors
+            statusBarItem.text = '$(warning) Go Index';
+            statusBarItem.tooltip = 'Go Search: Background loading failed. Click to rebuild.';
+        }
     }
 }
 

@@ -36,11 +36,13 @@ export class GoIndexer {
     private moduleFileWatcher?: vscode.FileSystemWatcher;
     private workspaceUpdateTimeout?: NodeJS.Timeout;
     private isBuilding: boolean = false;  // Track if index is being built
+    private context!: vscode.ExtensionContext;  // Store context for cleanup operations
     
     constructor(context: vscode.ExtensionContext) {
         try {
             console.log('GoIndexer: Starting initialization...');
             
+            this.context = context;  // Store context
             this.currentWorkspace = this.getCurrentWorkspaceId();
             this.indexPath = this.getIndexPath(context.globalStorageUri.fsPath);
             
@@ -523,26 +525,217 @@ export class GoIndexer {
     private async loadIndexPart(filePath: string): Promise<any[]> {
         try {
             if (!fs.existsSync(filePath)) {
+                console.log(`Index part file does not exist: ${filePath}`);
+                
+                // Check if this might be a multi-file format
+                const metaPath = filePath.replace('.json', '-meta.json');
+                if (fs.existsSync(metaPath)) {
+                    console.log(`Found multi-file metadata: ${metaPath}`);
+                    return await this.loadIndexPartMultiFile(filePath);
+                }
+                
                 return [];
             }
             
-            const data = fs.readFileSync(filePath, 'utf8');
-            const parsed = JSON.parse(data);
+            // Check file size before reading to avoid "Invalid string length" errors
+            const stats = fs.statSync(filePath);
+            const fileSizeMB = stats.size / (1024 * 1024);
+            console.log(`Loading index part: ${path.basename(filePath)} (${fileSizeMB.toFixed(2)}MB)`);
+            
+            // If file is too large (>200MB), skip it to avoid string length issues
+            if (stats.size > 200 * 1024 * 1024) {
+                console.log(`Index part file too large (${fileSizeMB.toFixed(2)}MB), skipping: ${filePath}`);
+                
+                // Remove the problematic file
+                try {
+                    fs.unlinkSync(filePath);
+                    console.log(`Removed oversized index part file: ${filePath}`);
+                } catch (deleteError) {
+                    console.error(`Failed to remove oversized file: ${filePath}`, deleteError);
+                }
+                
+                return [];
+            }
+            
+            // Read file with additional string length protection
+            let data: string;
+            try {
+                data = fs.readFileSync(filePath, 'utf8');
+            } catch (readError: any) {
+                if (readError.message && readError.message.includes('Invalid string length')) {
+                    console.log(`File read caused string length error, removing: ${filePath}`);
+                    try {
+                        fs.unlinkSync(filePath);
+                        console.log(`Removed problematic file: ${filePath}`);
+                    } catch (deleteError) {
+                        console.error(`Failed to remove problematic file: ${filePath}`, deleteError);
+                    }
+                }
+                throw readError;
+            }
+            
+            // Check string length before JSON parsing
+            const dataLengthMB = data.length / (1024 * 1024);
+            if (data.length > 100 * 1024 * 1024) { // 100MB string limit
+                console.log(`Index part data too large for JSON parsing (${dataLengthMB.toFixed(2)}MB), skipping: ${filePath}`);
+                
+                // Remove the problematic file
+                try {
+                    fs.unlinkSync(filePath);
+                    console.log(`Removed unparseable index part file: ${filePath}`);
+                } catch (deleteError) {
+                    console.error(`Failed to remove unparseable file: ${filePath}`, deleteError);
+                }
+                
+                return [];
+            }
+            
+            // Parse JSON with error handling
+            let parsed: any;
+            try {
+                parsed = JSON.parse(data);
+            } catch (parseError: any) {
+                console.error(`JSON parse error for ${filePath}:`, parseError);
+                
+                if (parseError.message && parseError.message.includes('Invalid string length')) {
+                    console.log(`JSON parsing caused string length error, removing: ${filePath}`);
+                    try {
+                        fs.unlinkSync(filePath);
+                        console.log(`Removed unparseable file: ${filePath}`);
+                    } catch (deleteError) {
+                        console.error(`Failed to remove unparseable file: ${filePath}`, deleteError);
+                    }
+                }
+                
+                return [];
+            }
             
             // Handle chunked format for large files
             if (parsed.chunks && Array.isArray(parsed.chunks)) {
                 console.log(`Loading chunked index part: ${parsed.totalEntries} total entries from ${parsed.chunks.length} chunks`);
                 const result = [];
+                
+                // Process chunks with safety limits
+                let processedEntries = 0;
+                const maxEntries = 50000; // Limit to prevent memory issues
+                
                 for (const chunk of parsed.chunks) {
-                    result.push(...chunk);
+                    if (Array.isArray(chunk)) {
+                        if (processedEntries + chunk.length > maxEntries) {
+                            console.log(`Reached entry limit (${maxEntries}), truncating remaining chunks`);
+                            const remainingSlots = maxEntries - processedEntries;
+                            if (remainingSlots > 0) {
+                                result.push(...chunk.slice(0, remainingSlots));
+                            }
+                            break;
+                        }
+                        result.push(...chunk);
+                        processedEntries += chunk.length;
+                    }
                 }
+                
+                console.log(`Loaded ${result.length} entries from chunked format`);
                 return result;
             }
             
             // Handle regular array format
-            return Array.isArray(parsed) ? parsed : [];
+            if (Array.isArray(parsed)) {
+                // Limit array size to prevent memory issues
+                const maxEntries = 50000;
+                if (parsed.length > maxEntries) {
+                    console.log(`Array too large (${parsed.length} entries), truncating to ${maxEntries}`);
+                    return parsed.slice(0, maxEntries);
+                }
+                
+                console.log(`Loaded ${parsed.length} entries from array format`);
+                return parsed;
+            }
+            
+            console.log(`Unknown format in ${filePath}, returning empty array`);
+            return [];
+            
         } catch (error) {
             console.error(`Failed to load index part ${filePath}:`, error);
+            
+            // If it's a string length error, try to remove the problematic file
+            if (error && typeof error === 'object' && 'message' in error && 
+                typeof (error as any).message === 'string' && 
+                (error as any).message.includes('Invalid string length')) {
+                console.log(`String length error detected, attempting to remove problematic file: ${filePath}`);
+                try {
+                    if (fs.existsSync(filePath)) {
+                        fs.unlinkSync(filePath);
+                        console.log(`Successfully removed problematic file: ${filePath}`);
+                    }
+                } catch (deleteError) {
+                    console.error(`Failed to remove problematic file: ${filePath}`, deleteError);
+                }
+            }
+            
+            return [];
+        }
+    }
+    
+    // Load multi-file format
+    private async loadIndexPartMultiFile(basePath: string): Promise<any[]> {
+        try {
+            const metaPath = basePath.replace('.json', '-meta.json');
+            
+            if (!fs.existsSync(metaPath)) {
+                console.log(`Multi-file metadata not found: ${metaPath}`);
+                return [];
+            }
+            
+            // Load metadata
+            const metaData = fs.readFileSync(metaPath, 'utf8');
+            const metadata = JSON.parse(metaData);
+            
+            if (metadata.type !== 'multi-file') {
+                console.log(`Invalid multi-file metadata type: ${metadata.type}`);
+                return [];
+            }
+            
+            console.log(`Loading multi-file index: ${metadata.totalEntries} entries from ${metadata.totalFiles} files`);
+            
+            const result = [];
+            let loadedFiles = 0;
+            let loadedEntries = 0;
+            
+            // Load all part files
+            for (let fileIndex = 0; fileIndex < metadata.totalFiles; fileIndex++) {
+                const partPath = basePath.replace('.json', `-part${fileIndex}.json`);
+                
+                try {
+                    if (fs.existsSync(partPath)) {
+                        const partData = fs.readFileSync(partPath, 'utf8');
+                        const partEntries = JSON.parse(partData);
+                        
+                        if (Array.isArray(partEntries)) {
+                            result.push(...partEntries);
+                            loadedEntries += partEntries.length;
+                            loadedFiles++;
+                            console.log(`Loaded part ${fileIndex}: ${partEntries.length} entries`);
+                        }
+                    } else {
+                        console.log(`Part file missing: ${partPath}`);
+                    }
+                } catch (partError) {
+                    console.error(`Failed to load part ${fileIndex}:`, partError);
+                    // Continue with other parts
+                }
+                
+                // Safety limit
+                if (loadedEntries >= 50000) {
+                    console.log(`Reached safety limit (50K entries), stopping multi-file load`);
+                    break;
+                }
+            }
+            
+            console.log(`Multi-file load completed: ${loadedEntries} entries from ${loadedFiles}/${metadata.totalFiles} files`);
+            return result;
+            
+        } catch (error) {
+            console.error(`Failed to load multi-file index:`, error);
             return [];
         }
     }
@@ -739,94 +932,266 @@ export class GoIndexer {
     
     private async indexDependencies() {
         try {
-            console.log('Starting to index dependencies...');
+            console.log('Starting to index project-specific dependencies...');
             
-            // Index Go module cache for each workspace folder
             const workspaceFolders = vscode.workspace.workspaceFolders;
             if (!workspaceFolders || workspaceFolders.length === 0) {
                 console.log('No workspace folders available for dependency indexing');
                 return;
             }
 
+            // Index dependencies for each workspace folder
             for (const workspaceFolder of workspaceFolders) {
                 console.log(`Indexing dependencies for workspace: ${workspaceFolder.name}`);
-                
-                // Get Go module cache path
-                const goModCachePath = await this.getGoModCachePath();
-                console.log(`Go module cache path: ${goModCachePath}`);
-                
-                if (fs.existsSync(goModCachePath)) {
-                    // Increase maxdepth to 8 to capture deep dependencies like AWS SDK
-                    // AWS SDK path: github.com/aws/aws-sdk-go-v2/service/s3@version/*.go (depth 6)
-                    console.log('Searching for Go files in module cache with maxdepth 8...');
-                    const { stdout } = await execPromise(`find "${goModCachePath}" -maxdepth 8 -name "*.go" -type f | head -20000`, {
-                        maxBuffer: 1024 * 1024 * 200
-                    });
-
-                    const files = stdout.trim().split('\n').filter(Boolean);
-                    console.log(`Found ${files.length} Go files in module cache`);
-                    
-                    // Log some example paths to verify AWS SDK is included
-                    const awsFiles = files.filter(f => f.includes('aws'));
-                    console.log(`Found ${awsFiles.length} AWS-related files`);
-                    if (awsFiles.length > 0) {
-                        console.log('Sample AWS files:', awsFiles.slice(0, 3));
-                    }
-                    
-                    // Check specifically for PresignGetObject
-                    const presignFiles = files.filter(f => f.includes('GetObject') || f.includes('s3'));
-                    console.log(`Found ${presignFiles.length} S3/GetObject related files`);
-                    if (presignFiles.length > 0) {
-                        console.log('Sample S3/GetObject files:', presignFiles.slice(0, 3));
-                    }
-                    
-                    // Index files in batches for better performance
-                    const batchSize = 100;
-                    for (let i = 0; i < files.length; i += batchSize) {
-                        const batch = files.slice(i, i + batchSize);
-                        await Promise.all(batch.map(file => this.indexFile(file, 'dependency')));
-                        
-                        if (i % 1000 === 0) {
-                            console.log(`Indexed ${i}/${files.length} dependency files...`);
-                        }
-                    }
-                    
-                    console.log(`Completed indexing ${files.length} dependency files`);
-                } else {
-                    console.log(`Go module cache path does not exist: ${goModCachePath}`);
-                }
-
-                // Also index vendor directories
-                const vendorPath = path.join(workspaceFolder.uri.fsPath, 'vendor');
-                if (fs.existsSync(vendorPath)) {
-                    console.log(`Indexing vendor directory: ${vendorPath}`);
-                    const { stdout } = await execPromise(`find "${vendorPath}" -name "*.go" -type f | head -5000`, {
-                        maxBuffer: 1024 * 1024 * 50
-                    });
-
-                    const vendorFiles = stdout.trim().split('\n').filter(Boolean);
-                    console.log(`Found ${vendorFiles.length} Go files in vendor`);
-                    
-                    for (const file of vendorFiles) {
-                        await this.indexFile(file, 'dependency');
-                    }
-                } else {
-                    console.log(`No vendor directory found at: ${vendorPath}`);
-                }
+                await this.indexWorkspaceDependencies(workspaceFolder.uri.fsPath);
             }
             
             console.log(`Finished indexing dependencies. Total: ${this.index.dependencies.size} files`);
             
-            // Log some statistics about indexed dependencies
-            const awsDeps = Array.from(this.index.dependencies.keys()).filter(path => path.includes('aws'));
-            console.log(`Indexed ${awsDeps.length} AWS-related dependency files`);
+        } catch (error) {
+            console.error('Failed to index dependencies:', error);
+        }
+    }
+    
+    // Index only the specific dependencies used by this workspace
+    private async indexWorkspaceDependencies(workspacePath: string) {
+        try {
+            // Step 1: Get the exact list of dependencies used by this project
+            const projectDeps = await this.getProjectDependencies(workspacePath);
+            console.log(`Found ${projectDeps.length} project dependencies`);
             
-            if (awsDeps.length > 0) {
-                console.log('Sample AWS dependency paths:', awsDeps.slice(0, 3));
+            if (projectDeps.length === 0) {
+                console.log('No dependencies found for this project');
+                return;
+            }
+            
+            // Log sample dependencies for verification
+            const sampleDeps = projectDeps.slice(0, 5).map(dep => `${dep.module} ${dep.version}`);
+            console.log('Sample dependencies:', sampleDeps);
+            
+            // Step 2: Get Go module cache path
+            const goModCachePath = await this.getGoModCachePath();
+            console.log(`Go module cache path: ${goModCachePath}`);
+            
+            if (!fs.existsSync(goModCachePath)) {
+                console.log('Go module cache not found, skipping dependency indexing');
+                return;
+            }
+            
+            // Step 3: Index only the specific versions used by this project
+            let indexedCount = 0;
+            let skippedCount = 0;
+            
+            for (const dep of projectDeps) {
+                try {
+                    const depPath = this.getDependencyPath(goModCachePath, dep);
+                    if (fs.existsSync(depPath)) {
+                        const fileCount = await this.indexDependencyFiles(depPath, dep);
+                        indexedCount += fileCount;
+                        
+                        if (dep.module.includes('aws')) {
+                            console.log(`✅ Indexed AWS dependency: ${dep.module}@${dep.version} (${fileCount} files)`);
+                        }
+                    } else {
+                        skippedCount++;
+                        if (dep.module.includes('aws') || dep.module.includes('gin')) {
+                            console.log(`⚠️ Dependency path not found: ${dep.module}@${dep.version} -> ${depPath}`);
+                        }
+                    }
+                } catch (depError) {
+                    console.error(`Failed to index dependency ${dep.module}:`, depError);
+                    skippedCount++;
+                }
+            }
+            
+            console.log(`Dependency indexing completed: ${indexedCount} files indexed, ${skippedCount} dependencies skipped`);
+            
+            // Step 4: Also index vendor directory if it exists (for vendored dependencies)
+            const vendorPath = path.join(workspacePath, 'vendor');
+            if (fs.existsSync(vendorPath)) {
+                console.log(`Indexing vendor directory: ${vendorPath}`);
+                const vendorFileCount = await this.indexVendorDirectory(vendorPath);
+                console.log(`Indexed ${vendorFileCount} files from vendor directory`);
             }
             
         } catch (error) {
-            console.error('Failed to index dependencies:', error);
+            console.error(`Failed to index dependencies for ${workspacePath}:`, error);
+        }
+    }
+    
+    // Get the exact list of dependencies used by this project
+    private async getProjectDependencies(workspacePath: string): Promise<Array<{module: string, version: string, path?: string}>> {
+        try {
+            console.log(`Getting project dependencies for: ${workspacePath}`);
+            
+            // Use 'go list -m all' to get the exact dependencies used by this project
+            const { stdout } = await execPromise('go list -m all', {
+                cwd: workspacePath,
+                maxBuffer: 1024 * 1024 * 10 // 10MB buffer
+            });
+            
+            const lines = stdout.trim().split('\n').filter(Boolean);
+            const dependencies = [];
+            
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) continue;
+                
+                // Parse dependency line: "module version [replacement]"
+                // Examples:
+                // github.com/gin-gonic/gin v1.9.1
+                // github.com/aws/aws-sdk-go-v2/service/s3 v1.40.0
+                // golang.org/x/net v0.10.0 => golang.org/x/net v0.10.0
+                
+                let module = '';
+                let version = '';
+                
+                if (trimmedLine.includes(' => ')) {
+                    // Handle replacements: "original => replacement"
+                    const parts = trimmedLine.split(' => ');
+                    const replacementPart = parts[1].trim();
+                    const replacementTokens = replacementPart.split(/\s+/);
+                    if (replacementTokens.length >= 2) {
+                        module = replacementTokens[0];
+                        version = replacementTokens[1];
+                    }
+                } else {
+                    // Normal dependency: "module version"
+                    const tokens = trimmedLine.split(/\s+/);
+                    if (tokens.length >= 2) {
+                        module = tokens[0];
+                        version = tokens[1];
+                    }
+                }
+                
+                // Skip the main module (first line) and invalid entries
+                if (module && version && version !== '' && !module.endsWith('/...')) {
+                    // Skip pseudo-versions and local replacements
+                    if (!version.startsWith('./') && !version.startsWith('../') && version !== '(devel)') {
+                        dependencies.push({ module, version });
+                    }
+                }
+            }
+            
+            // Filter out the main module (it should not be in dependencies)
+            const filteredDeps = dependencies.filter(dep => !dep.module.includes(path.basename(workspacePath)));
+            
+            console.log(`Parsed ${filteredDeps.length} valid dependencies from go list -m all`);
+            return filteredDeps;
+            
+        } catch (error) {
+            console.error('Failed to get project dependencies:', error);
+            
+            // Fallback: try to parse go.mod file directly
+            try {
+                return await this.parseGoModFile(workspacePath);
+            } catch (fallbackError) {
+                console.error('Fallback go.mod parsing also failed:', fallbackError);
+                return [];
+            }
+        }
+    }
+    
+    // Fallback: parse go.mod file directly if 'go list -m all' fails
+    private async parseGoModFile(workspacePath: string): Promise<Array<{module: string, version: string}>> {
+        try {
+            const goModPath = path.join(workspacePath, 'go.mod');
+            if (!fs.existsSync(goModPath)) {
+                console.log('go.mod file not found');
+                return [];
+            }
+            
+            const goModContent = fs.readFileSync(goModPath, 'utf8');
+            const dependencies = [];
+            
+            // Parse go.mod require block
+            const requireBlockMatch = goModContent.match(/require\s*\(([\s\S]*?)\)/);
+            if (requireBlockMatch) {
+                const requireBlock = requireBlockMatch[1];
+                const lines = requireBlock.split('\n');
+                
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (trimmedLine && !trimmedLine.startsWith('//')) {
+                        const tokens = trimmedLine.split(/\s+/);
+                        if (tokens.length >= 2) {
+                            const module = tokens[0];
+                            const version = tokens[1];
+                            dependencies.push({ module, version });
+                        }
+                    }
+                }
+            }
+            
+            // Also parse single-line require statements
+            const singleRequireRegex = /require\s+(\S+)\s+(\S+)/g;
+            let match;
+            while ((match = singleRequireRegex.exec(goModContent)) !== null) {
+                dependencies.push({ module: match[1], version: match[2] });
+            }
+            
+            console.log(`Parsed ${dependencies.length} dependencies from go.mod file`);
+            return dependencies;
+            
+        } catch (error) {
+            console.error('Failed to parse go.mod file:', error);
+            return [];
+        }
+    }
+    
+    // Get the exact file system path for a specific dependency version
+    private getDependencyPath(goModCachePath: string, dep: {module: string, version: string}): string {
+        // Go module cache structure: module@version
+        // Example: github.com/gin-gonic/gin@v1.9.1
+        const versionedModule = `${dep.module}@${dep.version}`;
+        return path.join(goModCachePath, versionedModule);
+    }
+    
+    // Index all .go files in a specific dependency directory
+    private async indexDependencyFiles(depPath: string, dep: {module: string, version: string}): Promise<number> {
+        try {
+            // Find all .go files in this specific dependency version
+            const { stdout } = await execPromise(`find "${depPath}" -name "*.go" -type f`, {
+                maxBuffer: 1024 * 1024 * 50 // 50MB buffer per dependency
+            });
+            
+            const files = stdout.trim().split('\n').filter(Boolean);
+            
+            if (files.length === 0) {
+                return 0;
+            }
+            
+            // Index all files for this dependency
+            for (const file of files) {
+                await this.indexFile(file, 'dependency');
+            }
+            
+            return files.length;
+            
+        } catch (error) {
+            console.error(`Failed to index files for ${dep.module}@${dep.version}:`, error);
+            return 0;
+        }
+    }
+    
+    // Index vendor directory (for vendored dependencies)
+    private async indexVendorDirectory(vendorPath: string): Promise<number> {
+        try {
+            const { stdout } = await execPromise(`find "${vendorPath}" -name "*.go" -type f | head -5000`, {
+                maxBuffer: 1024 * 1024 * 50
+            });
+
+            const vendorFiles = stdout.trim().split('\n').filter(Boolean);
+            
+            for (const file of vendorFiles) {
+                await this.indexFile(file, 'dependency');
+            }
+            
+            return vendorFiles.length;
+            
+        } catch (error) {
+            console.error('Failed to index vendor directory:', error);
+            return 0;
         }
     }
     
@@ -981,23 +1346,194 @@ export class GoIndexer {
     
     private async saveIndexPart(filePath: string, data: any) {
         try {
-            // For large arrays, save in chunks to avoid string length issues
-            if (Array.isArray(data) && data.length > 5000) {
-                console.log(`Saving large index part with ${data.length} entries in chunks: ${filePath}`);
-                const chunks = [];
-                const chunkSize = 2000;
+            // For non-array data, save directly (usually small metadata)
+            if (!Array.isArray(data)) {
+                try {
+                    const jsonString = JSON.stringify(data);
+                    if (jsonString.length > 10 * 1024 * 1024) { // 10MB limit for non-arrays
+                        console.log(`Non-array data too large (${(jsonString.length / 1024 / 1024).toFixed(2)}MB), skipping: ${filePath}`);
+                        return;
+                    }
+                    fs.writeFileSync(filePath, jsonString, 'utf8');
+                    return;
+                } catch (stringifyError: any) {
+                    if (stringifyError.message && stringifyError.message.includes('Invalid string length')) {
+                        console.log(`Non-array data caused string length error, skipping: ${filePath}`);
+                        return;
+                    }
+                    throw stringifyError;
+                }
+            }
+
+            // For arrays, implement ultra-aggressive chunking strategy
+            const arrayData = data as any[];
+            const arrayLength = arrayData.length;
+            
+            console.log(`Saving index part with ${arrayLength} entries: ${path.basename(filePath)}`);
+            
+            // If array is small enough, try direct save first
+            if (arrayLength <= 1000) {
+                try {
+                    const jsonString = JSON.stringify(arrayData);
+                    if (jsonString.length <= 20 * 1024 * 1024) { // 20MB limit for small arrays
+                        fs.writeFileSync(filePath, jsonString, 'utf8');
+                        console.log(`Saved small array directly: ${arrayLength} entries`);
+                        return;
+                    }
+                } catch (directSaveError: any) {
+                    console.log(`Direct save failed for small array, falling back to chunking: ${directSaveError.message}`);
+                }
+            }
+            
+            // For large arrays or failed direct saves, use multi-file chunking
+            if (arrayLength > 10000) {
+                console.log(`Array too large (${arrayLength} entries), using multi-file strategy`);
+                await this.saveIndexPartMultiFile(filePath, arrayData);
+                return;
+            }
+            
+            // For medium arrays (1000-10000), use ultra-small chunks
+            console.log(`Using ultra-small chunk strategy for ${arrayLength} entries`);
+            const ultraSmallChunkSize = Math.min(500, Math.max(100, Math.floor(arrayLength / 10))); // 100-500 entries per chunk
+            const chunks = [];
+            
+            for (let i = 0; i < arrayLength; i += ultraSmallChunkSize) {
+                const chunk = arrayData.slice(i, i + ultraSmallChunkSize);
+                chunks.push(chunk);
                 
-                for (let i = 0; i < data.length; i += chunkSize) {
-                    chunks.push(data.slice(i, i + chunkSize));
+                // Test chunk size to ensure it's safe
+                try {
+                    const testChunkString = JSON.stringify(chunk);
+                    if (testChunkString.length > 50 * 1024 * 1024) { // 50MB per chunk limit
+                        console.log(`Chunk ${i / ultraSmallChunkSize} too large, splitting further`);
+                        // Split this chunk further
+                        const miniChunkSize = Math.floor(ultraSmallChunkSize / 4);
+                        chunks.pop(); // Remove the large chunk
+                        for (let j = i; j < Math.min(i + ultraSmallChunkSize, arrayLength); j += miniChunkSize) {
+                            chunks.push(arrayData.slice(j, j + miniChunkSize));
+                        }
+                    }
+                } catch (chunkTestError) {
+                    console.log(`Chunk test failed, using even smaller chunks`);
+                    chunks.pop(); // Remove the problematic chunk
+                    const tinyChunkSize = Math.floor(ultraSmallChunkSize / 8);
+                    for (let j = i; j < Math.min(i + ultraSmallChunkSize, arrayLength); j += tinyChunkSize) {
+                        chunks.push(arrayData.slice(j, j + tinyChunkSize));
+                    }
+                }
+            }
+            
+            // Save chunked data with additional safety
+            try {
+                const chunkedData = { chunks, totalEntries: arrayLength, chunkStrategy: 'ultra-small' };
+                const chunkedJsonString = JSON.stringify(chunkedData);
+                
+                // Final size check
+                if (chunkedJsonString.length > 100 * 1024 * 1024) { // 100MB final limit
+                    console.log(`Chunked data still too large (${(chunkedJsonString.length / 1024 / 1024).toFixed(2)}MB), using multi-file strategy`);
+                    await this.saveIndexPartMultiFile(filePath, arrayData);
+                    return;
                 }
                 
-                fs.writeFileSync(filePath, JSON.stringify({ chunks, totalEntries: data.length }), 'utf8');
-            } else {
-                fs.writeFileSync(filePath, JSON.stringify(data), 'utf8');
+                fs.writeFileSync(filePath, chunkedJsonString, 'utf8');
+                console.log(`Saved chunked data: ${chunks.length} chunks, ${arrayLength} total entries`);
+                
+            } catch (chunkedSaveError: any) {
+                if (chunkedSaveError.message && chunkedSaveError.message.includes('Invalid string length')) {
+                    console.log(`Chunked save caused string length error, using multi-file strategy`);
+                    await this.saveIndexPartMultiFile(filePath, arrayData);
+                    return;
+                }
+                throw chunkedSaveError;
             }
+            
         } catch (error) {
             console.error(`Failed to save index part ${filePath}:`, error);
+            
+            // If it's a string length error, try emergency fallback
+            if (error && typeof error === 'object' && 'message' in error && 
+                typeof (error as any).message === 'string' && 
+                (error as any).message.includes('Invalid string length')) {
+                console.log(`String length error detected, attempting emergency fallback for ${filePath}`);
+                
+                try {
+                    if (Array.isArray(data)) {
+                        await this.saveIndexPartMultiFile(filePath, data);
+                        return;
+                    }
+                } catch (fallbackError) {
+                    console.error(`Emergency fallback also failed for ${filePath}:`, fallbackError);
+                }
+            }
+            
             throw error;
+        }
+    }
+    
+    // Multi-file strategy for extremely large datasets
+    private async saveIndexPartMultiFile(basePath: string, data: any[]) {
+        try {
+            const maxEntriesPerFile = 2000; // Very conservative
+            const totalFiles = Math.ceil(data.length / maxEntriesPerFile);
+            
+            console.log(`Splitting ${data.length} entries into ${totalFiles} files`);
+            
+            // Create metadata file
+            const metaPath = basePath.replace('.json', '-meta.json');
+            const metaData = {
+                type: 'multi-file',
+                totalEntries: data.length,
+                totalFiles: totalFiles,
+                maxEntriesPerFile: maxEntriesPerFile,
+                basePath: path.basename(basePath, '.json')
+            };
+            
+            fs.writeFileSync(metaPath, JSON.stringify(metaData), 'utf8');
+            console.log(`Created multi-file metadata: ${metaPath}`);
+            
+            // Save data in multiple files
+            let savedFiles = 0;
+            for (let fileIndex = 0; fileIndex < totalFiles; fileIndex++) {
+                const start = fileIndex * maxEntriesPerFile;
+                const end = Math.min(start + maxEntriesPerFile, data.length);
+                const fileData = data.slice(start, end);
+                
+                const filePath = basePath.replace('.json', `-part${fileIndex}.json`);
+                
+                try {
+                    // Extra safety check for each file
+                    const fileJsonString = JSON.stringify(fileData);
+                    if (fileJsonString.length > 30 * 1024 * 1024) { // 30MB per file limit
+                        console.log(`File part ${fileIndex} still too large, truncating...`);
+                        const truncatedData = fileData.slice(0, Math.floor(fileData.length / 2));
+                        fs.writeFileSync(filePath, JSON.stringify(truncatedData), 'utf8');
+                        console.log(`Saved truncated file part ${fileIndex}: ${truncatedData.length} entries`);
+                    } else {
+                        fs.writeFileSync(filePath, fileJsonString, 'utf8');
+                        console.log(`Saved file part ${fileIndex}: ${fileData.length} entries`);
+                    }
+                    savedFiles++;
+                } catch (fileError: any) {
+                    console.error(`Failed to save file part ${fileIndex}:`, fileError.message);
+                    // Continue with other files
+                }
+            }
+            
+            console.log(`Multi-file save completed: ${savedFiles}/${totalFiles} files saved`);
+            
+            // Remove the original single file if it exists
+            if (fs.existsSync(basePath)) {
+                try {
+                    fs.unlinkSync(basePath);
+                    console.log(`Removed original single file: ${basePath}`);
+                } catch (removeError) {
+                    console.log(`Warning: Could not remove original file: ${basePath}`);
+                }
+            }
+            
+        } catch (multiFileError) {
+            console.error(`Multi-file save strategy failed:`, multiFileError);
+            throw multiFileError;
         }
     }
     
@@ -1232,5 +1768,10 @@ export class GoIndexer {
         legacy: string;
     } {
         return this.getIndexPaths(storageDir);
+    }
+
+    // Public method to get storage directory path
+    getStorageDirectory(): string {
+        return this.context.globalStorageUri.fsPath;
     }
 } 

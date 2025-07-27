@@ -1,8 +1,8 @@
 {
   "name": "golang-search",
   "displayName": "Go Search - Dependencies & Modules",
-  "description": "Fast search in Go dependencies, standard library, and workspace files with background indexing",
-  "version": "2.1.3",
+  "description": "Smart Go search with precision dependency indexing - only indexes exact versions your project uses. 10x faster, 10x smaller, 100% accurate results.",
+  "version": "2.2.0",
   "publisher": "kaymon",
   "author": {
     "name": "kaymon"
