@@ -2,7 +2,7 @@
   "name": "golang-search",
   "displayName": "Golang Search",
   "description": "Fast parallel search for Go files and dependencies with ripgrep acceleration",
-  "version": "0.2.2",
+  "version": "1.0.1",
   "publisher": "kaymon",
   "author": {
     "name": "kaymon"
